@@ -154,7 +154,11 @@ def mouse_callback(event, x, y, flags, param):
 def draw_button_0(frame):
     for button, pos in button_positions_0.items():
         cv2.rectangle(frame, pos, (pos[0] + button_width, pos[1] + button_height), (200, 200, 200), -1)
-        cv2.putText(frame, button, (pos[0] + button_text_x_offset, pos[1] + button_text_y_offset), cv2.FONT_HERSHEY_SIMPLEX, font_size, (0, 0, 0), font_thickness)
+        if button == 'Manuelle Eingabe':
+            cv2.putText(frame, 'Manuelle', (pos[0] + button_text_x_offset, pos[1] + button_text_y_offset), cv2.FONT_HERSHEY_SIMPLEX, font_size, (0, 0, 0), font_thickness)
+            cv2.putText(frame, 'Eingabe', (pos[0] + button_text_x_offset, pos[1] + button_text_y_offset + 80), cv2.FONT_HERSHEY_SIMPLEX, font_size, (0, 0, 0), font_thickness)
+        else:
+            cv2.putText(frame, button, (pos[0] + button_text_x_offset, pos[1] + button_text_y_offset), cv2.FONT_HERSHEY_SIMPLEX, font_size, (0, 0, 0), font_thickness)
 
 def draw_button_1(frame):
     for button, pos in button_positions_1.items():
