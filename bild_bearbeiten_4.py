@@ -149,8 +149,16 @@ class MainWindow(QMainWindow):
         self.setLayout(layout)
 
         scan_button = QPushButton("Scannen")
-        # show_info_button.clicked.connect(self.on_show_info_clicked)
+        # scan_button.clicked.connect(self.on_show_info_clicked)
         button_layout.addWidget(scan_button)
+
+        remove_name_button = QPushButton("Namen entfernen")
+        # remove_name_button.clicked.connect(self.on_show_info_clicked)
+        button_layout.addWidget(remove_name_button)
+
+        undo_remove_name_button = QPushButton("Namen entfernen rückgängig")
+        # undo_remove_name_button.clicked.connect(self.on_show_info_clicked)
+        button_layout.addWidget(undo_remove_name_button)
 
         # Add the buttons to the layout
         layout.addLayout(button_layout)
