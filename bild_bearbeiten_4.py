@@ -171,7 +171,7 @@ class MainWindow(QMainWindow):
         button_layout = QHBoxLayout() # Control layout
 
         scan_button = QPushButton("Scannen")
-        # scan_button.clicked.connect(self.on_show_info_clicked)
+        scan_button.clicked.connect(self.scan_image)
         button_layout.addWidget(scan_button)
 
         remove_name_button = QPushButton("Namen entfernen")
@@ -248,16 +248,18 @@ class MainWindow(QMainWindow):
         Open a file dialog to pick an image file, then load it using cv2,
         resize to the specified maximum dimension, and display it in the QLabel.
         """
-        file_name, _ = QFileDialog.getOpenFileName(
+        self.img_name, _ = QFileDialog.getOpenFileName(
             self,
             "Open Image",
             "",
             "Image Files (*.png *.jpg *.jpeg *.bmp *.tiff);;All Files (*)"
         )
 
-        if file_name:
+        # print(f'img_name: {self.img_name}') # Debugging
+
+        if self.img_name:
             # Use OpenCV to read the image (BGR format)
-            cv_img = cv2.imread(file_name)
+            cv_img = cv2.imread(self.img_name)
 
             if cv_img is not None:
                 # Convert BGR (OpenCV) to RGB
@@ -415,6 +417,26 @@ class MainWindow(QMainWindow):
 
         zoomed_patch = cv2.resize(patch, (zoomed_w, zoomed_h), interpolation=cv2.INTER_LINEAR)
         self.show_image_in_label(zoomed_patch, self.magnify_label)
+
+    def scan_image(self):
+        from Modules.class_easyOCR_V1 import OCRProcessor  # for ocr detection, Moved to run_detection() function for faster app
+        print("Scan image clicked")
+        if self.img_name is not None:
+            # Initialize the OCR processor
+            ocr_processor = OCRProcessor()
+
+            # Perform OCR on the given image
+            image_path = self.img_name
+            df_ocr_results = ocr_processor.ocr(image_path)
+            # print(df_ocr_results.head(5)) # Debugging
+
+            save_path = '../csv_speichern'
+            # Save the OCR results to a CSV file
+            ocr_processor.save_to_csv(df_ocr_results, image_path, save_path)
+            print(df_ocr_results)
+        else:
+            print("No image selected")
+        return 1
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
