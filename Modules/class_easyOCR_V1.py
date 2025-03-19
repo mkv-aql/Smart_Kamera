@@ -6,6 +6,12 @@ import cv2
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import random
+
+# example of random integer values
+# random.seed(0)
+# for _ in range(10):
+#     print(random.randint(0, 100))
 
 # Set global Pandas and NumPy options
 pd.set_option('display.max_columns', None)  # Display all columns
@@ -65,8 +71,11 @@ class OCRProcessor:
         :param df_ocr_results: DataFrame containing OCR results (bbox, text, confidence).
         :return: Image with bounding boxes drawn around the detected text.
         """
+        random.seed(0)
+
         image = cv2.imread(image_path)
         for bbox in df_ocr_results['bbox']:
+            rand = random.randint(0, 255)
             # if bbox is a string then use ast.literal_eval to convert it to a list
             if isinstance(bbox, str):
                 bbox = ast.literal_eval(bbox)
@@ -77,6 +86,7 @@ class OCRProcessor:
 
 
 if __name__ == "__main__":
+    random.seed(0)
     # Initialize the OCR processor
     ocr_processor = OCRProcessor()
 
@@ -92,18 +102,14 @@ if __name__ == "__main__":
     # Display the image with bounding boxes
     image = cv2.imread(image_path)
     for bbox in df_ocr_results['bbox']:
+        rand = random.randint(100, 200)
         # if bbox is a string then use ast.literal_eval to convert it to a list
         if isinstance(bbox, str):
             bbox = ast.literal_eval(bbox)
         #bbox = ast.literal_eval(bbox) # Use if bbox is from csv file
         print(f'bbox values: {bbox}')
-        try:
-            cv2.rectangle(image, (int(bbox[0][0]), int(bbox[0][1])), (int(bbox[2][0]), int(bbox[2][1])), (0, 255, 0), 3)
-        except:
-            print(f'Error with bbox: {bbox}')
 
-        finally:
-            cv2.rectangle(image, (int(bbox[0][0]), int(bbox[0][1])), (int(bbox[2][0]), int(bbox[2][1])), (0, 255, 0), 3)
+        cv2.rectangle(image, (int(bbox[0][0]), int(bbox[0][1])), (int(bbox[2][0]), int(bbox[2][1])), (0, rand, rand), 3)
 
     # Reduce the image size for display
     scale_percent = 30# percent of original size

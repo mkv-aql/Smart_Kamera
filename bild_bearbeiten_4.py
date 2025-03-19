@@ -21,7 +21,7 @@ from PyQt5.QtWidgets import (
     QMenu, QAction, QToolBar, QStatusBar, QMessageBox,
     QFileDialog, QColorDialog, QFontDialog, QInputDialog
 )
-from PyQt5.QtCore import QTimer, Qt, QPoint
+from PyQt5.QtCore import QTimer, Qt, QPoint, QThread, QObject, pyqtSignal, QMutex
 from PyQt5.QtGui import QImage, QPixmap
 
 
@@ -33,6 +33,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Klingelschild-Reiniger")
         self.setGeometry(100, 100, int(width*scale), int(height*scale))
         self.setWindowIcon(QtGui.QIcon("icon/DGN_Bildmarke_orange_rgb.png"))
+
+        # Shared image for threads, to safely pass data between threads
+        self.shared_image = QImage()
+        self.mutex = QMutex() # Mutex for shared list
+        self.thread = None # Thread object
+        self.worker = None # Worker object
 
         # Create a central widget which will hold a QTabWidget with multiple tabs
         self.central_widget = QTabWidget()
@@ -170,9 +176,9 @@ class MainWindow(QMainWindow):
 
         button_layout = QHBoxLayout() # Control layout
 
-        scan_button = QPushButton("Scannen")
-        scan_button.clicked.connect(self.scan_image)
-        button_layout.addWidget(scan_button)
+        self.scan_button = QPushButton("Scannen")
+        self.scan_button.clicked.connect(self.scan_image)
+        button_layout.addWidget(self.scan_button)
 
         remove_name_button = QPushButton("Namen entfernen")
         # remove_name_button.clicked.connect(self.on_show_info_clicked)
@@ -419,9 +425,72 @@ class MainWindow(QMainWindow):
         self.show_image_in_label(zoomed_patch, self.magnify_label)
 
     def scan_image(self):
-        from Modules.class_easyOCR_V1 import OCRProcessor  # for ocr detection, Moved to run_detection() function for faster app
         print("Scan image clicked")
+
+        # Disable button to avoid multiple clicks
+        self.scan_button.setEnabled(False)
+        self.image_label.setText("Loading image... please wait.")
+        self.thread = QThread() # Create a QThread object
+        self.worker = Worker(shared_image=self.shared_image, mutex=self.mutex, file_path=self.img_name) # Create a worker object
+
+        self.worker.moveToThread(self.thread)
+
+        # Connect signals:
+        # - Start the worker's run method when the thread starts
+        self.thread.started.connect(self.worker.run)
+
+        # - When the worker finishes, clean up the thread/worker
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+
+        # - Re-enable the button after the thread finishes
+        self.thread.finished.connect(lambda: self.load_button.setEnabled(True))
+
+        # Start the thread
+        self.thread.start()
+
+    def scan_image_stop_thread(self):
+        """
+        Stop thread and worker
+        """
+        if self.worker:
+            self.worker.stop()
+            self.worker = None
+
+
+class Worker(QObject):
+    """
+    Worker thread for running the OCR detection.
+
+    """
+
+    finished = pyqtSignal() # Signal to indicate that the worker has finished
+    progress = pyqtSignal(str) # Signal to report progress
+
+    def __init__(self, shared_image: QImage, mutex: QMutex, file_path: str):
+        super().__init__()
+
+        self.shared_image = shared_image
+        self.mutex = mutex
+        self.file_path = file_path
+
+    def run(self):
+        """
+        Long-running task that will be started in a separate thread.
+        """
+        self.progress.emit("[Worker] Starting to load image ...")
+        from Modules.class_easyOCR_V1 import \
+            OCRProcessor  # for ocr detection, Moved to run_detection() function for faster app
+
+        self.img_name = QImage(self.file_path)
+
         if self.img_name is not None:
+            # Emit progress signal
+            self.progress.emit("Worker: Successfully loaded image in worker. Now locking mutex...")
+            # Lock the mutex before writing to the shared image
+            self.mutex.lock()
+
             # Initialize the OCR processor
             ocr_processor = OCRProcessor()
 
@@ -434,9 +503,15 @@ class MainWindow(QMainWindow):
             # Save the OCR results to a CSV file
             ocr_processor.save_to_csv(df_ocr_results, image_path, save_path)
             print(df_ocr_results)
+
+            self.mutex.unlock() # Unlock the mutex after writing to the shared image
+            self.progress.emit("[Worker] Image done")
+            self.finished.emit()
         else:
             print("No image selected")
-        return 1
+            self.progress.emit("[Worker] Image process failed")
+            self.finished.emit()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
