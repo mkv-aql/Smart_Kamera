@@ -1,9 +1,12 @@
 __author__ = 'mkv-aql'
 import os
+import threading
+
 # import nothing
 import cv2
 import pandas as pd
 import ast
+import time
 from Modules.class_highlight import RectangleSelector as rs #For highlighting module
 from Modules.class_cutout import ImageCutoutSaver as ics #For cutout module
 from Modules.class_entry_input_2 import CsvEditor as ei #For entry input module
@@ -31,14 +34,14 @@ class MainWindow(QMainWindow):
 
         # Basic window setup
         self.setWindowTitle("Klingelschild-Reiniger")
-        self.setGeometry(100, 100, int(width*scale), int(height*scale))
+        self.setGeometry(1000, 100, int(width*scale), int(height*scale)) # Set window location
         self.setWindowIcon(QtGui.QIcon("icon/DGN_Bildmarke_orange_rgb.png"))
 
-        # Shared image for threads, to safely pass data between threads
-        self.shared_image = QImage()
-        self.mutex = QMutex() # Mutex for shared list
-        self.thread = None # Thread object
-        self.worker = None # Worker object
+        # # Shared image for threads, to safely pass data between threads
+        # self.shared_image = QImage()
+        # self.mutex = QMutex() # Mutex for shared list
+        # self.thread = None # Thread object
+        # self.worker = None # Worker object
 
         # Create a central widget which will hold a QTabWidget with multiple tabs
         self.central_widget = QTabWidget()
@@ -50,6 +53,7 @@ class MainWindow(QMainWindow):
         self.is_magnifying = False
         self.magnify_scale_factor = 4  # How much to zoom in
         self.magnify_window_size = 50  # Half-size of sampling window in original coordinates
+        self.scanner_active_status = False # Scanner status
 
         # Create tabs
         self.files_tab = QWidget()
@@ -65,6 +69,9 @@ class MainWindow(QMainWindow):
         self.init_files_tab()
         self.init_edit_tab()
         self.init_test_tab()
+
+        # Declare threads
+        self.run_scanner_thread = threading.Thread(target=self.scanner_activated_thread)
 
     # --------------------------------------------------------------------------
     # Tabs Setup
@@ -98,9 +105,13 @@ class MainWindow(QMainWindow):
         # self.tree_widget.addTopLevelItem(root_item)
         for file_name, data in example_dict.items():
             root_item = QTreeWidgetItem([file_name, "", ""])
+            # Make the root item editable:
+            root_item.setFlags(root_item.flags() | Qt.ItemIsEditable)
             tree_widget.addTopLevelItem(root_item)
             for row in data:
                 child_item = QTreeWidgetItem(row)
+                # Make the child item editable:
+                child_item.setFlags(child_item.flags() | Qt.ItemIsEditable)
                 root_item.addChild(child_item)
 
 
@@ -175,6 +186,10 @@ class MainWindow(QMainWindow):
 
 
         button_layout = QHBoxLayout() # Control layout
+
+        self.activate_scanner_button = QPushButton("Scanner aktivieren")
+        self.activate_scanner_button.clicked.connect(self.activate_scanner)
+        button_layout.addWidget(self.activate_scanner_button)
 
         self.scan_button = QPushButton("Scannen")
         self.scan_button.clicked.connect(self.scan_image)
@@ -318,7 +333,7 @@ class MainWindow(QMainWindow):
                 self.cv_img_rgb_display = cv_img_rgb_display
 
                 # REsize the window
-                self.setGeometry(300, 100, disp_width, disp_height)
+                self.setGeometry(500, 100, disp_width, disp_height) # Set window location
 
                 # Display the image in the label
                 if to_tab == 'edit':
@@ -424,93 +439,104 @@ class MainWindow(QMainWindow):
         zoomed_patch = cv2.resize(patch, (zoomed_w, zoomed_h), interpolation=cv2.INTER_LINEAR)
         self.show_image_in_label(zoomed_patch, self.magnify_label)
 
+    # --------------------------------------------------------------------------
+    # Scanner Functions
+    # --------------------------------------------------------------------------
+
+    def activate_scanner(self):
+        """
+        Activate or deactivate the scanner.
+        :return: None
+        """
+        # self.run_scanner_thread = threading.Thread(target=self.scanner_activated_thread)
+
+        if self.scanner_active_status == False:
+            self.activate_scanner_button.setText("Scanner deaktivieren") # Change button text
+            self.scanner_active_status = True
+            self.run_scanner_thread.start()
+            print('Scanner activated')
+        elif self.scanner_active_status == True:
+            self.activate_scanner_button.setText("Scanner aktivieren")
+            # Stop the scanner
+            self.scanner_active_status = False
+            self.run_scanner_thread.join()
+            self.ocr_processor = None  # Clear the OCR processor
+            print("Scanner deactivated")
+
+    def scanner_activated_thread(self):
+        modulename = 'OCRProcessor'
+        if modulename not in sys.modules:
+            from Modules.class_easyOCR_V1 import OCRProcessor
+        # Initialize the OCR processor
+        self.ocr_processor = OCRProcessor()
+        print('ocr_processor initialized')
+
+
     def scan_image(self):
         print("Scan image clicked")
+        print(self.img_name)
 
         # Disable button to avoid multiple clicks
         self.scan_button.setEnabled(False)
-        self.image_label.setText("Loading image... please wait.")
-        self.thread = QThread() # Create a QThread object
-        self.worker = Worker(shared_image=self.shared_image, mutex=self.mutex, file_path=self.img_name) # Create a worker object
 
-        self.worker.moveToThread(self.thread)
+        self.scan_thread = threading.Thread(target=self.scan_image_thread, args=(self.img_name,))
+        self.scan_thread.start()
 
-        # Connect signals:
-        # - Start the worker's run method when the thread starts
-        self.thread.started.connect(self.worker.run)
+        # time.sleep(3) # Simulate a long-running task
+        self.scan_thread.join()
+        print('scan_thread finished')
 
-        # - When the worker finishes, clean up the thread/worker
-        self.worker.finished.connect(self.thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
+        # Enable button to stop scanning
+        self.scan_button.setEnabled(True)
 
-        # - Re-enable the button after the thread finishes
-        self.thread.finished.connect(lambda: self.load_button.setEnabled(True))
+    def show_scanned_names(self):
+        csv_path = 'csv_speichern'
 
-        # Start the thread
-        self.thread.start()
+        # Get file name from the image path
+        file_name = self.img_name.split('/')[-1].split('.')[0]
 
-    def scan_image_stop_thread(self):
-        """
-        Stop thread and worker
-        """
-        if self.worker:
-            self.worker.stop()
-            self.worker = None
+        self.opened_csv_file = pd.read_csv(f'{csv_path}/{file_name}.csv')
+
+        df_ocr_results = self.opened_csv_file
+
+        for bbox in df_ocr_results['bbox']:
+            # if bbox is a string then use ast.literal_eval to convert it to a list
+            if isinstance(bbox, str):
+                bbox = ast.literal_eval(bbox)
+            # bbox = ast.literal_eval(bbox) # Use if bbox is from csv file
+            print(f'bbox values: {bbox}')
+            scaled_ratio = self.cv_img_rgb_display.shape[0] / self.cv_img_rgb_original.shape[0]
+
+            cv2.rectangle(self.cv_img_rgb_display,
+                          (int((bbox[0][0])*scaled_ratio), int((bbox[0][1])*scaled_ratio)),
+                          (int((bbox[2][0])*scaled_ratio), int((bbox[2][1])*scaled_ratio)),
+                          (0, 255, 0), 1)
+
+        self.show_image_in_label(self.cv_img_rgb_display, self.label_edit_tab)
 
 
-class Worker(QObject):
-    """
-    Worker thread for running the OCR detection.
 
-    """
 
-    finished = pyqtSignal() # Signal to indicate that the worker has finished
-    progress = pyqtSignal(str) # Signal to report progress
+    def scan_image_thread(self, img_name_local):
+        # from Modules.class_easyOCR_V1 import OCRProcessor
+        # # Initialize the OCR processor
+        # ocr_processor = OCRProcessor()
+        # Perform OCR on the given image
+        df_ocr_results = self.ocr_processor.ocr(img_name_local)
+        print(df_ocr_results.head(5))
 
-    def __init__(self, shared_image: QImage, mutex: QMutex, file_path: str):
-        super().__init__()
+        # save_path = '../csv_speichern'
+        save_path = 'csv_speichern'
+        # Save the OCR results to a CSV file
+        self.ocr_processor.save_to_csv(df_ocr_results, img_name_local, save_path)
 
-        self.shared_image = shared_image
-        self.mutex = mutex
-        self.file_path = file_path
+        self.show_scanned_names()
 
-    def run(self):
-        """
-        Long-running task that will be started in a separate thread.
-        """
-        self.progress.emit("[Worker] Starting to load image ...")
-        from Modules.class_easyOCR_V1 import \
-            OCRProcessor  # for ocr detection, Moved to run_detection() function for faster app
+        # Simulate a long-running task
+        # time.sleep(3)
+        print("Scan image thread finished")
 
-        self.img_name = QImage(self.file_path)
 
-        if self.img_name is not None:
-            # Emit progress signal
-            self.progress.emit("Worker: Successfully loaded image in worker. Now locking mutex...")
-            # Lock the mutex before writing to the shared image
-            self.mutex.lock()
-
-            # Initialize the OCR processor
-            ocr_processor = OCRProcessor()
-
-            # Perform OCR on the given image
-            image_path = self.img_name
-            df_ocr_results = ocr_processor.ocr(image_path)
-            # print(df_ocr_results.head(5)) # Debugging
-
-            save_path = '../csv_speichern'
-            # Save the OCR results to a CSV file
-            ocr_processor.save_to_csv(df_ocr_results, image_path, save_path)
-            print(df_ocr_results)
-
-            self.mutex.unlock() # Unlock the mutex after writing to the shared image
-            self.progress.emit("[Worker] Image done")
-            self.finished.emit()
-        else:
-            print("No image selected")
-            self.progress.emit("[Worker] Image process failed")
-            self.finished.emit()
 
 
 if __name__ == "__main__":
