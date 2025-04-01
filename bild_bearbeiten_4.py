@@ -1,19 +1,14 @@
 __author__ = 'mkv-aql'
-import os
-import threading
 
 # import nothing
-import cv2
+import cv2, csv, ast, time, threading, os, sys
 import pandas as pd
-import ast
-import time
 from Modules.class_highlight import RectangleSelector as rs #For highlighting module
 from Modules.class_cutout import ImageCutoutSaver as ics #For cutout module
 from Modules.class_entry_input_2 import CsvEditor as ei #For entry input module
 # from Modules.class_easyOCR_V1 import OCRProcessor # for ocr detection, Moved to run_detection() function for faster app
 from Modules.class_magnification_feature import ImageLabel #For magnification module
 
-import sys
 from PyQt5 import QtGui
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QDialog,
@@ -22,7 +17,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QCalendarWidget, QTabWidget, QTableWidget,
     QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QMenuBar,
     QMenu, QAction, QToolBar, QStatusBar, QMessageBox,
-    QFileDialog, QColorDialog, QFontDialog, QInputDialog
+    QFileDialog, QColorDialog, QFontDialog, QInputDialog, QAbstractItemView
 )
 from PyQt5.QtCore import QTimer, Qt, QPoint, QThread, QObject, pyqtSignal, QMutex
 from PyQt5.QtGui import QImage, QPixmap
@@ -73,6 +68,8 @@ class MainWindow(QMainWindow):
         # Declare threads
         self.run_scanner_thread = threading.Thread(target=self.scanner_activated_thread)
 
+
+
     # --------------------------------------------------------------------------
     # Tabs Setup
     # --------------------------------------------------------------------------
@@ -89,45 +86,21 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(form_layout)
 
-        # ---------------------------------------------------------------------------
-        # Tree
-        example_dict = {
-            "Briefkaesten_beispeil":
-                [["ID Nummer 1", "Max", "[123],[456],[789],[101]"],
-                 ["ID Nummer 2", "Mustermann", "[123],[456],[789],[101]"]],
 
-            "Briefkaesten_beispeil_2":
-                [["ID Nummer 2", "Mustermann", "[123],[456],[789],[101]"]]
-        }
-        tree_widget = QTreeWidget()
-        tree_widget.setHeaderLabels(["Bildname", "Namen", "Bbox"])
-        # root_item = QTreeWidgetItem(["Briefkaesten_beispeil.jpg", "", ""])
-        # self.tree_widget.addTopLevelItem(root_item)
-        for file_name, data in example_dict.items():
-            root_item = QTreeWidgetItem([file_name, "", ""])
-            # Make the root item editable:
-            root_item.setFlags(root_item.flags() | Qt.ItemIsEditable)
-            tree_widget.addTopLevelItem(root_item)
-            for row in data:
-                child_item = QTreeWidgetItem(row)
-                # Make the child item editable:
-                child_item.setFlags(child_item.flags() | Qt.ItemIsEditable)
-                root_item.addChild(child_item)
+        # ------------- CSV Tree widget -------------
+        self.csv_tree_widget = QTreeWidget()
+        self.csv_tree_widget.setHeaderLabels(["Bildname", "Namen", "Bbox"])
+        # Make items editable by double-click:
+        self.csv_tree_widget.setEditTriggers(QAbstractItemView.DoubleClicked)
+        layout.addWidget(self.csv_tree_widget)
+        # Populate from example_dict on startup
+        self.populate_tree_from_dict()
 
-
-        # for file_name, data in example_dict.items():
-        #     file_item = QTreeWidgetItem([file_name, "", ""])
-        #     root_item.addChild(file_item)
-        #     for row in data:
-        #         child_item = QTreeWidgetItem(row)
-        #         file_item.addChild(child_item)
-
-        # child1 = QTreeWidgetItem(["ID Nummer 1", "Max", "[123],[456],[789],[101]"])
-        # child2 = QTreeWidgetItem(["ID Nummer 2", "Mustermann", "[123],[456],[789],[101]"])
-        # root_item.addChild(child1)
-        # root_item.addChild(child2)
-
-        layout.addWidget(tree_widget)
+        # ------------- Image Tree widget -------------
+        self.image_tree_widget = QTreeWidget()
+        self.image_tree_widget.setHeaderLabels(["Bildname"])
+        self.image_tree_widget.itemDoubleClicked.connect(self.image_tree_item_double_clicked)
+        layout.addWidget(self.image_tree_widget)
 
         # ---------------------------------------------------------------------------
         # Create a QSpinBox to set max dimension
@@ -147,7 +120,6 @@ class MainWindow(QMainWindow):
         layout.addLayout(controls_layout)
 
 
-
         # Button layout
         button_layout = QHBoxLayout()
 
@@ -158,8 +130,18 @@ class MainWindow(QMainWindow):
 
 
         select_folder_button = QPushButton("Ordnerauswahl")
-        # show_message_box_button.clicked.connect(self.on_show_message_box_clicked)
+        select_folder_button.clicked.connect(self.open_folder)
         button_layout.addWidget(select_folder_button)
+
+
+        csv_open_button = QPushButton("CSV-Datei öffnen")
+        csv_open_button.clicked.connect(self.open_csv_dialog)
+        button_layout.addWidget(csv_open_button)
+
+
+        csv_save_button = QPushButton("CSV-Datei speichern")
+        csv_save_button.clicked.connect(self.save_csv_dialog)
+        button_layout.addWidget(csv_save_button)
 
 
         show_message_box_button = QPushButton("Hello World")
@@ -203,6 +185,10 @@ class MainWindow(QMainWindow):
         # undo_remove_name_button.clicked.connect(self.on_show_info_clicked)
         button_layout.addWidget(undo_remove_name_button)
 
+        self.save_image_button = QPushButton("Namen speichern")
+        # self.save_image_button.clicked.connect(self.save_image_and_update_csv)
+        button_layout.addWidget(self.save_image_button)
+
         # Add the buttons to the layout
         layout.addLayout(button_layout)
 
@@ -222,7 +208,6 @@ class MainWindow(QMainWindow):
         self.magnify_button.setCheckable(True)
         self.magnify_button.clicked.connect(self.toggle_magnify)
         button_layout.addWidget(self.magnify_button)  # Control layout
-
 
 
     def init_test_tab(self):
@@ -276,7 +261,7 @@ class MainWindow(QMainWindow):
             "Image Files (*.png *.jpg *.jpeg *.bmp *.tiff);;All Files (*)"
         )
 
-        # print(f'img_name: {self.img_name}') # Debugging
+        # print(f'img_name: {self.img_name}') # Debugging, image directory
 
         if self.img_name:
             # Use OpenCV to read the image (BGR format)
@@ -351,6 +336,103 @@ class MainWindow(QMainWindow):
 
             else:
                 QMessageBox.warning(self, "Error", "Failed to load image.")
+
+    def only_open_image(self, image_directory):
+        """
+        Open a file dialog to pick an image file, then load it using cv2,
+        resize to the specified maximum dimension, and display it in the QLabel.
+        """
+
+        # print(f'img_name: {self.img_name}') # Debugging
+
+        self.img_name = image_directory
+
+        if self.img_name:
+            # Use OpenCV to read the image (BGR format)
+            cv_img = cv2.imread(self.img_name)
+
+            if cv_img is not None:
+                # Convert BGR (OpenCV) to RGB
+                self.cv_img_rgb_original = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+                # Get dimensions
+                orig_height, orig_width, channel = self.cv_img_rgb_original.shape
+
+                # Retrieve user-selected maximum dimension
+                if hasattr(self, 'max_size_spin_files_tab'):
+                    max_dim = self.max_size_spin_files_tab.value()
+                else:
+                    max_dim = 800
+
+                # If the image exceeds max_dim in width or height, resize
+                if orig_width > max_dim or orig_height > max_dim:
+                    # Calculate the scale factor, preserving aspect ratio
+                    scale = min(max_dim / orig_width, max_dim / orig_height)
+                    disp_width = int(orig_width * scale)
+                    disp_height = int(orig_height * scale)
+
+                    # Resize using OpenCV for efficiency
+                    cv_img_rgb_display = cv2.resize(self.cv_img_rgb_original,
+                                            (disp_width, disp_height),
+                                            interpolation=cv2.INTER_AREA)
+                else:
+                    disp_width = orig_width  # No need to resize
+                    disp_height = orig_height
+                    # No need to resize
+                    height, width, channel = self.cv_img_rgb_display.copy()  # create copy
+
+                #Store the scaled / unchanged result in the instance variable:
+                self.cv_img_rgb_display = cv_img_rgb_display
+
+                # REsize the window
+                self.setGeometry(500, 100, disp_width, disp_height) # Set window location
+
+                # Display the image in the label
+                self.show_image_in_label(cv_img_rgb_display, self.label_edit_tab)
+
+                # Switch to the 'Edit Tab' automatically
+                self.central_widget.setCurrentIndex(1)
+
+            else:
+                QMessageBox.warning(self, "Error", "Failed to load image.")
+
+    def open_folder(self):
+        """
+           Opens a folder selection dialog, lists all images in the RIGHT tree.
+           Left tree is left empty for future use.
+           """
+        folder_path = QFileDialog.getExistingDirectory(self, "Select Folder", "")
+        if not folder_path:
+            return
+
+        # Clear the right tree before listing new files
+        self.image_tree_widget.clear()
+
+        image_extensions = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"}
+
+        for filename in os.listdir(folder_path):
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in image_extensions:
+                item = QTreeWidgetItem([filename])
+                full_path = os.path.join(folder_path, filename)
+                # Store full path so we can open the image later
+                item.setData(0, Qt.UserRole, full_path)
+
+                self.image_tree_widget.addTopLevelItem(item)
+
+    def image_tree_item_double_clicked(self, item, column):
+        """
+        User double-clicked an image name in the tree -> show it on the second tab.
+        """
+        # Retrieve the file path from the item
+        file_path = item.data(0, Qt.UserRole)
+        # print(file_path) # debugging
+        # print(self.img_name) # debugging
+
+        # Switch to the image tab and display the selected image
+        self.central_widget.setCurrentIndex(1)
+        self.only_open_image(file_path)
+
+
 
     def show_image_in_label(self, img_rgb, label):
         """Convert a numpy RGB image to QPixmap and display it in the given label."""
@@ -464,11 +546,13 @@ class MainWindow(QMainWindow):
             print("Scanner deactivated")
 
     def scanner_activated_thread(self):
+        self.activate_scanner_button.setText("Scanner lädt")  # Just to show loading status
         modulename = 'OCRProcessor'
         if modulename not in sys.modules:
             from Modules.class_easyOCR_V1 import OCRProcessor
         # Initialize the OCR processor
         self.ocr_processor = OCRProcessor()
+        self.activate_scanner_button.setText("Scanner deaktivieren")  # Change button text
         print('ocr_processor initialized')
 
 
@@ -515,8 +599,6 @@ class MainWindow(QMainWindow):
         self.show_image_in_label(self.cv_img_rgb_display, self.label_edit_tab)
 
 
-
-
     def scan_image_thread(self, img_name_local):
         # from Modules.class_easyOCR_V1 import OCRProcessor
         # # Initialize the OCR processor
@@ -535,6 +617,135 @@ class MainWindow(QMainWindow):
         # Simulate a long-running task
         # time.sleep(3)
         print("Scan image thread finished")
+
+    # --------------------------------------------------------------------------
+    # CSV Functions
+    # --------------------------------------------------------------------------
+    def open_csv_dialog(self):
+        """
+        Open a file dialog to pick a CSV file, then populate the QTreeWidget
+        with the CSV contents.
+        """
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open CSV File",
+            "",
+            "CSV Files (*.csv);;All Files (*)"
+        )
+        if not file_path:
+            return  # User canceled or closed the dialog
+
+        # Store the path so we can save changes back to the same file
+        self.current_csv_path = file_path
+
+        # Read the CSV file
+        rows = []
+        with open(file_path, newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+
+        if not rows:
+            return  # CSV was empty
+
+        # NEW: Clear existing items before adding new CSV rows
+        self.csv_tree_widget.clear()
+
+        # If the CSV has a header row, let's skip it or do something with it
+        # For example, if the first line is a header, you can do:
+        # header = rows[0]
+        # Create custom header
+        header = ['bbox','Namen','Confidence Level','Bildname']
+        self.csv_tree_widget.setHeaderLabels(header)
+        # First row will always be after the header
+        rows = rows[1:]
+        #
+        # But if your CSV data is purely rows with the same 3 columns,
+        # you can just treat them all as data items.
+
+        # Insert each CSV row as a new top-level item
+        for row_data in rows:
+            # If the row doesn't have exactly 3 columns, you may need to pad or slice
+            # e.g., row_data = row_data[:3] or something like that
+            while len(row_data) < 4:
+                row_data.append("")  # pad to ensure at least 3 columns
+            # Create an item from this row
+            item = QTreeWidgetItem(row_data[:4])  # take exactly 3 columns
+            item.setFlags(item.flags() | Qt.ItemIsEditable)
+
+            # We add it as a top-level item, but you could also place it under some root
+            self.csv_tree_widget.addTopLevelItem(item)
+
+    def populate_tree_from_dict(self):
+        """
+        Populate the QTreeWidget from a hard-coded dictionary (example_dict).
+        Each key becomes a 'root' item; each sub-list becomes child items.
+        """
+        example_dict = {
+            "Briefkaesten_beispeil": [
+                ["ID Nummer 1", "Max", "[123],[456],[789],[101]"],
+                ["ID Nummer 2", "Mustermann", "[123],[456],[789],[101]"]
+            ],
+            "Briefkaesten_beispeil_2": [
+                ["ID Nummer 2", "Mustermann", "[123],[456],[789],[101]"]
+            ]
+        }
+
+        # Clear existing items (in case you're re-calling this)
+        self.csv_tree_widget.clear()
+
+        # Re-set column headers (optional, only if changed)
+        self.csv_tree_widget.setHeaderLabels(["Bildname", "Namen", "Bbox"])
+
+        for file_name, data in example_dict.items():
+            root_item = QTreeWidgetItem([file_name, "", ""])
+            # Make the root item editable:
+            root_item.setFlags(root_item.flags() | Qt.ItemIsEditable)
+            self.csv_tree_widget.addTopLevelItem(root_item)
+
+            for row in data:
+                child_item = QTreeWidgetItem(row)
+                # Make the child item editable:
+                child_item.setFlags(child_item.flags() | Qt.ItemIsEditable)
+                root_item.addChild(child_item)
+
+    def save_csv_dialog(self):
+        """
+        Write the current data from the QTreeWidget back to self.current_csv_path.
+        """
+        # If no file has been opened yet, prompt user or do nothing
+        if not self.current_csv_path:
+            # (Optional) Let the user pick a location to save
+            # In that case, you'd do something like:
+            # self.current_csv_path, _ = QFileDialog.getSaveFileName(...)
+            # if not self.current_csv_path:
+            #     return
+            print("No file path available to save.")
+            return
+
+        # Gather data from each top-level item
+        num_top_items = self.csv_tree_widget.topLevelItemCount()
+        num_columns = self.csv_tree_widget.columnCount()
+
+        data_rows = []
+        for i in range(num_top_items):
+            item = self.csv_tree_widget.topLevelItem(i)
+            row_data = []
+            for col in range(num_columns):
+                row_data.append(item.text(col))
+            data_rows.append(row_data)
+
+        # check header
+        expected_header = ['bbox','Namen','Confidence Level','Bildname']
+        if not data_rows or data_rows[0] != expected_header:
+            # Insert the header at the beginning
+            data_rows.insert(0, expected_header)
+
+        # Write CSV
+        with open(self.current_csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerows(data_rows)
+
+        print(f"Saved changes back to: {self.current_csv_path}")
 
 
 

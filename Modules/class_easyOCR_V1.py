@@ -37,9 +37,15 @@ class OCRProcessor:
         :return: A DataFrame containing OCR results (bbox, Namen, Confidence Level).
         """
         image = cv2.imread(image_path)
-        ocr_results = self.reader.readtext(image, contrast_ths=0.05, adjust_contrast=0.7, text_threshold=0.8,
+        ocr_results = self.reader.readtext(image, contrast_ths=0.05,
+                                           adjust_contrast=0.7,
+                                           text_threshold=0.8,
                                            low_text=0.4)
-        df_ocr_results = pd.DataFrame(ocr_results, columns=['bbox', 'Namen', 'Confidence Level'])
+        df_ocr_results = pd.DataFrame(ocr_results,
+                                      columns=['bbox', 'Namen', 'Confidence Level'])
+
+        df_ocr_results.insert(3, 'Bildname', image_path.split('/')[-1].split('.')[0])
+
         return df_ocr_results
 
     def save_to_csv(self, df_ocr_results, image_path, save_path):
@@ -57,6 +63,7 @@ class OCRProcessor:
             (bbox[0][0], bbox[0][1], bbox[1][0], bbox[1][1],
              bbox[2][0], bbox[2][1], bbox[3][0], bbox[3][1]) = (int(bbox[0][0]), int(bbox[0][1]), int(bbox[1][0]), int(bbox[1][1]),
                                                                 int(bbox[2][0]), int(bbox[2][1]), int(bbox[3][0]), int(bbox[3][1]))
+
 
         csv_name = f'{save_path}/{file_name}.csv'
         df_ocr_results.to_csv(csv_name, index=False)
