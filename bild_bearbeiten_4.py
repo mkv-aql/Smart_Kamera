@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (
     QMenu, QAction, QToolBar, QStatusBar, QMessageBox,
     QFileDialog, QColorDialog, QFontDialog, QInputDialog, QAbstractItemView
 )
-from PyQt5.QtCore import QTimer, Qt, QPoint, QThread, QObject, pyqtSignal, QMutex
+from PyQt5.QtCore import QTimer, Qt, QPoint, QThread, QObject, pyqtSignal, QMutex, QDir
 from PyQt5.QtGui import QImage, QPixmap
 
 
@@ -98,7 +98,7 @@ class MainWindow(QMainWindow):
 
         # ------------- Image Tree widget -------------
         self.image_tree_widget = QTreeWidget()
-        self.image_tree_widget.setHeaderLabels(["Bildname"])
+        self.image_tree_widget.setHeaderLabels(["Bildname", "CSV-Datei"])
         self.image_tree_widget.itemDoubleClicked.connect(self.image_tree_item_double_clicked)
         layout.addWidget(self.image_tree_widget)
 
@@ -261,7 +261,7 @@ class MainWindow(QMainWindow):
             "Image Files (*.png *.jpg *.jpeg *.bmp *.tiff);;All Files (*)"
         )
 
-        # print(f'img_name: {self.img_name}') # Debugging, image directory
+        # print(f'img_name: {self.img_name}') # Debugging, image directory D:/Users/AGAM MUHAJIR/Documents/Projects/Smart_Kamera/10998509.jpg
 
         if self.img_name:
             # Use OpenCV to read the image (BGR format)
@@ -425,8 +425,9 @@ class MainWindow(QMainWindow):
         """
         # Retrieve the file path from the item
         file_path = item.data(0, Qt.UserRole)
-        # print(file_path) # debugging
-        # print(self.img_name) # debugging
+        file_path = QDir.fromNativeSeparators(file_path) # convert back slash to forward slash in directory string
+        # print(f'image tree double click file_path: {file_path}') # debugging
+        # print(f'image tree double click self.img_name: {self.img_name}') # debugging
 
         # Switch to the image tab and display the selected image
         self.central_widget.setCurrentIndex(1)
@@ -558,7 +559,8 @@ class MainWindow(QMainWindow):
 
     def scan_image(self):
         print("Scan image clicked")
-        print(self.img_name)
+        print("self.img_name: ", self.img_name)
+        # self.img_name = self.img_name.split("\\")[0]
 
         # Disable button to avoid multiple clicks
         self.scan_button.setEnabled(False)
@@ -579,7 +581,9 @@ class MainWindow(QMainWindow):
         # Get file name from the image path
         file_name = self.img_name.split('/')[-1].split('.')[0]
 
-        self.opened_csv_file = pd.read_csv(f'{csv_path}/{file_name}.csv')
+        self.current_csv_path = f'{csv_path}/{file_name}.csv' # update current csv path
+
+        self.opened_csv_file = pd.read_csv(self.current_csv_path)
 
         df_ocr_results = self.opened_csv_file
 
@@ -589,7 +593,7 @@ class MainWindow(QMainWindow):
                 bbox = ast.literal_eval(bbox)
             # bbox = ast.literal_eval(bbox) # Use if bbox is from csv file
             print(f'bbox values: {bbox}')
-            scaled_ratio = self.cv_img_rgb_display.shape[0] / self.cv_img_rgb_original.shape[0]
+            scaled_ratio = self.cv_img_rgb_display.shape[0] / self.cv_img_rgb_original.shape[0] # match the ratio of the original image to the displayed image
 
             cv2.rectangle(self.cv_img_rgb_display,
                           (int((bbox[0][0])*scaled_ratio), int((bbox[0][1])*scaled_ratio)),
@@ -597,6 +601,10 @@ class MainWindow(QMainWindow):
                           (0, 255, 0), 1)
 
         self.show_image_in_label(self.cv_img_rgb_display, self.label_edit_tab)
+
+        self.update_tree(self.current_csv_path) #update tree with new data from scanned image
+
+
 
 
     def scan_image_thread(self, img_name_local):
@@ -612,7 +620,8 @@ class MainWindow(QMainWindow):
         # Save the OCR results to a CSV file
         self.ocr_processor.save_to_csv(df_ocr_results, img_name_local, save_path)
 
-        self.show_scanned_names()
+        self.show_scanned_names() # update image with scanned names
+
 
         # Simulate a long-running task
         # time.sleep(3)
@@ -638,6 +647,11 @@ class MainWindow(QMainWindow):
         # Store the path so we can save changes back to the same file
         self.current_csv_path = file_path
 
+        self.update_tree(self.current_csv_path)
+
+
+
+    def update_tree(self, file_path):
         # Read the CSV file
         rows = []
         with open(file_path, newline='', encoding='utf-8') as f:
@@ -654,7 +668,7 @@ class MainWindow(QMainWindow):
         # For example, if the first line is a header, you can do:
         # header = rows[0]
         # Create custom header
-        header = ['bbox','Namen','Confidence Level','Bildname']
+        header = ['bbox', 'Namen', 'Confidence Level', 'Bildname']
         self.csv_tree_widget.setHeaderLabels(header)
         # First row will always be after the header
         rows = rows[1:]
@@ -745,7 +759,7 @@ class MainWindow(QMainWindow):
             writer = csv.writer(f)
             writer.writerows(data_rows)
 
-        print(f"Saved changes back to: {self.current_csv_path}")
+        # print(f"Saved changes back to: {self.current_csv_path}") # Debugging
 
 
 

@@ -58,6 +58,7 @@ class OCRProcessor:
         """
         # Get file name from the image path
         file_name = image_path.split('/')[-1].split('.')[0]
+        # print("file_name:", file_name) # debugging
 
         for bbox in df_ocr_results['bbox']:
             (bbox[0][0], bbox[0][1], bbox[1][0], bbox[1][1],
