@@ -3,6 +3,8 @@ __author__ = 'mkv-aql'
 # import nothing
 import cv2, csv, ast, time, threading, os, sys
 import pandas as pd
+from pygments import highlight
+
 from Modules.class_highlight import RectangleSelector as rs #For highlighting module
 from Modules.class_cutout import ImageCutoutSaver as ics #For cutout module
 from Modules.class_entry_input_2 import CsvEditor as ei #For entry input module
@@ -17,7 +19,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QCalendarWidget, QTabWidget, QTableWidget,
     QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QMenuBar,
     QMenu, QAction, QToolBar, QStatusBar, QMessageBox,
-    QFileDialog, QColorDialog, QFontDialog, QInputDialog, QAbstractItemView
+    QFileDialog, QColorDialog, QFontDialog, QInputDialog, QAbstractItemView, QProgressDialog
 )
 from PyQt5.QtCore import QTimer, Qt, QPoint, QThread, QObject, pyqtSignal, QMutex, QDir
 from PyQt5.QtGui import QImage, QPixmap
@@ -32,11 +34,6 @@ class MainWindow(QMainWindow):
         self.setGeometry(1000, 100, int(width*scale), int(height*scale)) # Set window location
         self.setWindowIcon(QtGui.QIcon("icon/DGN_Bildmarke_orange_rgb.png"))
 
-        # # Shared image for threads, to safely pass data between threads
-        # self.shared_image = QImage()
-        # self.mutex = QMutex() # Mutex for shared list
-        # self.thread = None # Thread object
-        # self.worker = None # Worker object
 
         # Create a central widget which will hold a QTabWidget with multiple tabs
         self.central_widget = QTabWidget()
@@ -49,6 +46,7 @@ class MainWindow(QMainWindow):
         self.magnify_scale_factor = 4  # How much to zoom in
         self.magnify_window_size = 50  # Half-size of sampling window in original coordinates
         self.scanner_active_status = False # Scanner status
+        self.jump_to_image = False # Jump to image status, True will jump to image tab after selected
 
         # Create tabs
         self.files_tab = QWidget()
@@ -125,12 +123,12 @@ class MainWindow(QMainWindow):
 
         select_image_button = QPushButton("Bildauswahl")
         # show_message_box_button.clicked.connect(self.on_show_message_box_clicked)
-        select_image_button.clicked.connect(lambda: self.open_image(from_tab='files', to_tab='edit'), )
+        select_image_button.clicked.connect(lambda: self.open_image_dialog(from_tab='files', to_tab='edit'), )
         button_layout.addWidget(select_image_button)
 
 
         select_folder_button = QPushButton("Ordnerauswahl")
-        select_folder_button.clicked.connect(self.open_folder)
+        select_folder_button.clicked.connect(self.open_image_folder)
         button_layout.addWidget(select_folder_button)
 
 
@@ -144,9 +142,9 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(csv_save_button)
 
 
-        show_message_box_button = QPushButton("Hello World")
-        # show_message_box_button.clicked.connect(self.on_show_message_box_clicked)
-        button_layout.addWidget(show_message_box_button)
+        scan_all_image_button = QPushButton("Alle Bilder scannen ")
+        scan_all_image_button.clicked.connect(self.scan_all_image)
+        button_layout.addWidget(scan_all_image_button)
 
         layout.addLayout(button_layout)
 
@@ -225,7 +223,7 @@ class MainWindow(QMainWindow):
         # Create a button to open the file dialog
         open_button = QPushButton("Open Image")
         # open_button.clicked.connect(self.open_image, from_tab='test')
-        open_button.clicked.connect(lambda: self.open_image(from_tab='test', to_tab='test'), )
+        open_button.clicked.connect(lambda: self.open_image_dialog(from_tab='test', to_tab='test'), )
 
         # Create a QSpinBox to set max dimension
         self.max_size_spin = QSpinBox()
@@ -247,9 +245,68 @@ class MainWindow(QMainWindow):
         self.central_widget.addTab(tab, "Test Tab")
 
     # --------------------------------------------------------------------------
-    # Functions Setup
+    # Basic Functions
     # --------------------------------------------------------------------------
-    def open_image(self, from_tab='test', to_tab=''):
+    def image_resize(self, cv_img, max_pixel=800, from_tab='test', to_tab=''):
+
+        # Convert BGR (OpenCV) to RGB
+        self.cv_img_rgb_original = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+        # Get dimensions
+        orig_height, orig_width, channel = self.cv_img_rgb_original.shape
+
+        # Retrieve user-selected maximum dimension
+        # (Make sure self.max_size_spin exists, i.e., if we're on the 'Test Tab')
+        # Fall back if needed, or raise an AttributeError if not found.
+        if hasattr(self, 'max_size_spin') and from_tab == 'test':
+            max_dim = self.max_size_spin.value()
+        else:
+            max_dim = max_pixel  # Some default if the spinbox isn't present
+
+        if hasattr(self, 'max_size_spin_files_tab') and from_tab == 'files':
+            max_dim = self.max_size_spin_files_tab.value()
+        else:
+            max_dim = max_pixel
+
+        # If the image exceeds max_dim in width or height, resize
+        if orig_width > max_dim or orig_height > max_dim:
+            # Calculate the scale factor, preserving aspect ratio
+            scale = min(max_dim / orig_width, max_dim / orig_height)
+            disp_width = int(orig_width * scale)
+            disp_height = int(orig_height * scale)
+
+            # Resize using OpenCV for efficiency
+            cv_img_rgb_display = cv2.resize(self.cv_img_rgb_original,
+                                            (disp_width, disp_height),
+                                            interpolation=cv2.INTER_AREA)
+        else:
+            disp_width = orig_width  # No need to resize
+            disp_height = orig_height
+            # No need to resize
+            height, width, channel = self.cv_img_rgb_display.copy()  # create copy
+
+        return cv_img_rgb_display, disp_width, disp_height
+
+    def resize_window(self, loc_x=500, loc_y=100, disp_width=800, disp_height=800):
+        self.setGeometry(loc_x, loc_y, disp_width, disp_height)  # Set window location
+
+    def fetch_top_level_tree_items(self, tree_widget):
+        """
+        Fetch all top-level items from the given QTreeWidget.
+        """
+        items = []
+        for i in range(tree_widget.topLevelItemCount()):
+            item = tree_widget.topLevelItem(i)
+            path = item.data(0, Qt.UserRole)  # Get the full path from the item
+            path = QDir.fromNativeSeparators(path)  # convert back slash to forward slash in directory string
+            items.append(path)
+        return items
+
+
+
+    # --------------------------------------------------------------------------
+    # Image Data Functions
+    # --------------------------------------------------------------------------
+    def open_image_dialog(self, from_tab='test', to_tab=''):
         """
         Open a file dialog to pick an image file, then load it using cv2,
         resize to the specified maximum dimension, and display it in the QLabel.
@@ -268,57 +325,14 @@ class MainWindow(QMainWindow):
             cv_img = cv2.imread(self.img_name)
 
             if cv_img is not None:
-                # Convert BGR (OpenCV) to RGB
-                self.cv_img_rgb_original = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-                # Get dimensions
-                orig_height, orig_width, channel = self.cv_img_rgb_original.shape
+                cv_img_rgb_display, disp_width, disp_height = self.image_resize(cv_img)
 
-                # Retrieve user-selected maximum dimension
-                # (Make sure self.max_size_spin exists, i.e., if we're on the 'Test Tab')
-                # Fall back if needed, or raise an AttributeError if not found.
-                if hasattr(self, 'max_size_spin') and from_tab == 'test':
-                    max_dim = self.max_size_spin.value()
-                else:
-                    max_dim = 800  # Some default if the spinbox isn't present
-
-                if hasattr(self, 'max_size_spin_files_tab') and from_tab == 'files':
-                    max_dim = self.max_size_spin_files_tab.value()
-                else:
-                    max_dim = 800
-
-                # If the image exceeds max_dim in width or height, resize
-                if orig_width > max_dim or orig_height > max_dim:
-                    # Calculate the scale factor, preserving aspect ratio
-                    scale = min(max_dim / orig_width, max_dim / orig_height)
-                    disp_width = int(orig_width * scale)
-                    disp_height = int(orig_height * scale)
-
-                    # Resize using OpenCV for efficiency
-                    cv_img_rgb_display = cv2.resize(self.cv_img_rgb_original,
-                                            (disp_width, disp_height),
-                                            interpolation=cv2.INTER_AREA)
-                else:
-                    disp_width = orig_width  # No need to resize
-                    disp_height = orig_height
-                    # No need to resize
-                    height, width, channel = self.cv_img_rgb_display.copy()  # create copy
-
-                """
-                ## MOVED to show_image_in_label function
-                # Create QImage from numpy data
-                bytes_per_line = channel * width
-                q_image = QImage(cv_img_rgb_display.data, width, height, bytes_per_line, QImage.Format_RGB888) # moved to show_image_in_label function
-
-                # Convert QImage to QPixmap
-                pixmap = QPixmap.fromImage(q_image) # moved to show_image_in_label function
-
-                """
 
                 #Store the scaled / unchanged result in the instance variable:
                 self.cv_img_rgb_display = cv_img_rgb_display
 
                 # REsize the window
-                self.setGeometry(500, 100, disp_width, disp_height) # Set window location
+                self.resize_window(disp_width=disp_width, disp_height=disp_height)
 
                 # Display the image in the label
                 if to_tab == 'edit':
@@ -330,17 +344,21 @@ class MainWindow(QMainWindow):
 
                 # Switch to the 'Edit Tab' automatically
                 if to_tab == 'edit':
-                    self.central_widget.setCurrentIndex(1)
+                    if self.jump_to_image:
+                        self.central_widget.setCurrentIndex(1)
                 elif to_tab == 'test':
                     self.central_widget.setCurrentIndex(2)
 
             else:
                 QMessageBox.warning(self, "Error", "Failed to load image.")
 
+        self.show_image_info_in_tree(self.img_name) # Show image info in the tree widget
+
+
     def only_open_image(self, image_directory):
         """
-        Open a file dialog to pick an image file, then load it using cv2,
-        resize to the specified maximum dimension, and display it in the QLabel.
+        Only opens image
+        no dialog box
         """
 
         # print(f'img_name: {self.img_name}') # Debugging
@@ -352,50 +370,61 @@ class MainWindow(QMainWindow):
             cv_img = cv2.imread(self.img_name)
 
             if cv_img is not None:
-                # Convert BGR (OpenCV) to RGB
-                self.cv_img_rgb_original = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-                # Get dimensions
-                orig_height, orig_width, channel = self.cv_img_rgb_original.shape
+                cv_img_rgb_display, disp_width, disp_height = self.image_resize(cv_img, from_tab='files')
 
-                # Retrieve user-selected maximum dimension
-                if hasattr(self, 'max_size_spin_files_tab'):
-                    max_dim = self.max_size_spin_files_tab.value()
-                else:
-                    max_dim = 800
-
-                # If the image exceeds max_dim in width or height, resize
-                if orig_width > max_dim or orig_height > max_dim:
-                    # Calculate the scale factor, preserving aspect ratio
-                    scale = min(max_dim / orig_width, max_dim / orig_height)
-                    disp_width = int(orig_width * scale)
-                    disp_height = int(orig_height * scale)
-
-                    # Resize using OpenCV for efficiency
-                    cv_img_rgb_display = cv2.resize(self.cv_img_rgb_original,
-                                            (disp_width, disp_height),
-                                            interpolation=cv2.INTER_AREA)
-                else:
-                    disp_width = orig_width  # No need to resize
-                    disp_height = orig_height
-                    # No need to resize
-                    height, width, channel = self.cv_img_rgb_display.copy()  # create copy
-
-                #Store the scaled / unchanged result in the instance variable:
+                # Store the scaled / unchanged result in the instance variable:
                 self.cv_img_rgb_display = cv_img_rgb_display
 
                 # REsize the window
-                self.setGeometry(500, 100, disp_width, disp_height) # Set window location
+                self.resize_window(disp_width=disp_width, disp_height=disp_height)
 
                 # Display the image in the label
                 self.show_image_in_label(cv_img_rgb_display, self.label_edit_tab)
 
                 # Switch to the 'Edit Tab' automatically
-                self.central_widget.setCurrentIndex(1)
+                if self.jump_to_image:
+                    self.central_widget.setCurrentIndex(1)
 
             else:
                 QMessageBox.warning(self, "Error", "Failed to load image.")
 
-    def open_folder(self):
+    def show_image_info_in_tree(self, image_directory):
+        """
+        Show image info in the tree widget
+        """
+        filename = QDir.fromNativeSeparators(image_directory)  # convert back slash to forward slash in directory string
+        filename = filename.split('/')[-1] # Get the filename from the full path
+        # print(f'filename: {filename}') # Debugging
+        item = QTreeWidgetItem([filename])
+        # Store full path so we can open the image later
+        item.setData(0, Qt.UserRole, image_directory)
+        self.image_tree_widget.addTopLevelItem(item)
+
+    def refresh_image_info_in_tree(self):
+        """
+        Refresh image info in the tree widget with the newly scanned csv files
+        """
+        #fetch all top level items
+        folder_path_list = self.fetch_top_level_tree_items(self.image_tree_widget)
+        # print(f'folder_path_list: {folder_path_list}') # Debugging
+
+        # Clear the right tree before listing new files
+        self.image_tree_widget.clear()
+
+        # Loop through all items and add them to the tree widget
+        for image in folder_path_list:
+            #fetch the csv name of the image file
+            csv = self.find_csv_file_of_image(image)
+
+            # print(f'item: {item}') # Debugging
+            item = QTreeWidgetItem([image, csv])
+            # Store full path so we can open the image later
+            item.setData(0, Qt.UserRole, item)
+            self.image_tree_widget.addTopLevelItem(item)
+
+
+
+    def open_image_folder(self):
         """
            Opens a folder selection dialog, lists all images in the RIGHT tree.
            Left tree is left empty for future use.
@@ -410,14 +439,21 @@ class MainWindow(QMainWindow):
         image_extensions = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"}
 
         for filename in os.listdir(folder_path):
-            ext = os.path.splitext(filename)[1].lower()
+            ext = os.path.splitext(filename)[1].lower() # Get the file extension
             if ext in image_extensions:
-                item = QTreeWidgetItem([filename])
-                full_path = os.path.join(folder_path, filename)
-                # Store full path so we can open the image later
-                item.setData(0, Qt.UserRole, full_path)
 
-                self.image_tree_widget.addTopLevelItem(item)
+                full_path = os.path.join(folder_path, filename) # Get full path
+                self.show_image_info_in_tree(full_path) # Show image info in the tree widget
+                '''
+                # item = QTreeWidgetItem([filename])
+                full_path = os.path.join(folder_path, filename) # Get full path
+                # Store full path so we can open the image later
+                # item.setData(0, Qt.UserRole, full_path)
+                
+                # self.image_tree_widget.addTopLevelItem(item)
+                '''
+        # temp = self.fetch_top_level_tree_items(self.image_tree_widget) # debug
+        # print("fetch tree top level list: ", temp) # debug
 
     def image_tree_item_double_clicked(self, item, column):
         """
@@ -429,10 +465,30 @@ class MainWindow(QMainWindow):
         # print(f'image tree double click file_path: {file_path}') # debugging
         # print(f'image tree double click self.img_name: {self.img_name}') # debugging
 
+        # Find the csv file of the image if available
+        self.find_csv_file_of_image(file_path)
+        self.update_tree(self.current_csv_path)  # update tree with new data from scanned image
+
+        # clear any bold texts
+        self.highlight_selected_item(item, column)
+
         # Switch to the image tab and display the selected image
-        self.central_widget.setCurrentIndex(1)
+        if self.jump_to_image:
+            self.central_widget.setCurrentIndex(1)
         self.only_open_image(file_path)
 
+    def highlight_selected_item(self, item, column):
+        # clear any bold texts
+        for i in range(self.image_tree_widget.topLevelItemCount()):
+            text = self.image_tree_widget.topLevelItem(i)
+            for j in range(item.columnCount()):
+                font = text.font(j)
+                font.setBold(False)
+                text.setFont(j, font)
+        # make selected text bold
+        font = item.font(column)
+        font.setBold(True)
+        item.setFont(column, font)
 
 
     def show_image_in_label(self, img_rgb, label):
@@ -529,6 +585,7 @@ class MainWindow(QMainWindow):
     def activate_scanner(self):
         """
         Activate or deactivate the scanner.
+        So that scanner module dont need to re-run for every image
         :return: None
         """
         # self.run_scanner_thread = threading.Thread(target=self.scanner_activated_thread)
@@ -547,6 +604,14 @@ class MainWindow(QMainWindow):
             print("Scanner deactivated")
 
     def scanner_activated_thread(self):
+        """
+        Activate or deactivate the scanner.
+        So that scanner module dont need to re-run for every image
+        show loading status
+        :return: None
+        """
+
+
         self.activate_scanner_button.setText("Scanner lädt")  # Just to show loading status
         modulename = 'OCRProcessor'
         if modulename not in sys.modules:
@@ -557,7 +622,7 @@ class MainWindow(QMainWindow):
         print('ocr_processor initialized')
 
 
-    def scan_image(self):
+    def scan_image(self, batch_scanning=False):
         print("Scan image clicked")
         print("self.img_name: ", self.img_name)
         # self.img_name = self.img_name.split("\\")[0]
@@ -565,7 +630,7 @@ class MainWindow(QMainWindow):
         # Disable button to avoid multiple clicks
         self.scan_button.setEnabled(False)
 
-        self.scan_thread = threading.Thread(target=self.scan_image_thread, args=(self.img_name,))
+        self.scan_thread = threading.Thread(target=self.scan_image_thread, args=(self.img_name, batch_scanning))
         self.scan_thread.start()
 
         # time.sleep(3) # Simulate a long-running task
@@ -605,9 +670,7 @@ class MainWindow(QMainWindow):
         self.update_tree(self.current_csv_path) #update tree with new data from scanned image
 
 
-
-
-    def scan_image_thread(self, img_name_local):
+    def scan_image_thread(self, img_name_local, batch_scanning=False):
         # from Modules.class_easyOCR_V1 import OCRProcessor
         # # Initialize the OCR processor
         # ocr_processor = OCRProcessor()
@@ -620,12 +683,29 @@ class MainWindow(QMainWindow):
         # Save the OCR results to a CSV file
         self.ocr_processor.save_to_csv(df_ocr_results, img_name_local, save_path)
 
-        self.show_scanned_names() # update image with scanned names
+        if not batch_scanning:
+            self.show_scanned_names() # update image with scanned names
+
 
 
         # Simulate a long-running task
         # time.sleep(3)
         print("Scan image thread finished")
+
+    def scan_all_image(self):
+        """
+        Scan all images in the selected folder
+        """
+        # Get the selected folder path from the image tree widget
+        folder_path_list = self.fetch_top_level_tree_items(self.image_tree_widget)
+        print(f'folder_path: {folder_path_list}') # debug
+
+        for folder_path in folder_path_list:
+            # insert into self.img_name
+            self.img_name = folder_path
+            # Run scan_image_thread
+            self.scan_image(batch_scanning=True)
+
 
     # --------------------------------------------------------------------------
     # CSV Functions
@@ -761,6 +841,17 @@ class MainWindow(QMainWindow):
 
         # print(f"Saved changes back to: {self.current_csv_path}") # Debugging
 
+    def find_csv_file_of_image(self, image_path):
+        file_path = image_path
+        # Find the csv file of the image if available
+        csv_folder = 'csv_speichern'
+        csv_file_name = file_path.split('/')[-1].split('.')[0] + '.csv'  # Get the csv file name
+
+        # check if the csv file exists
+        if os.path.exists(f'{csv_folder}/{csv_file_name}'):
+            # If the csv file exists, open it
+            self.current_csv_path = f'{csv_folder}/{csv_file_name}'
+            # print(f'csv file exists: {self.current_csv_path}')  # debugging
 
 
 
