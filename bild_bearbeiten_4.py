@@ -5,6 +5,7 @@ import cv2, csv, ast, time, threading, os, sys
 import pandas as pd
 from pygments import highlight
 
+from Modules.class_clickable_image_V1 import ClickableImageLabel # For clickable image label
 from Modules.class_highlight import RectangleSelector as rs #For highlighting module
 from Modules.class_cutout import ImageCutoutSaver as ics #For cutout module
 from Modules.class_entry_input_2 import CsvEditor as ei #For entry input module
@@ -21,7 +22,7 @@ from PyQt5.QtWidgets import (
     QMenu, QAction, QToolBar, QStatusBar, QMessageBox,
     QFileDialog, QColorDialog, QFontDialog, QInputDialog, QAbstractItemView, QProgressDialog
 )
-from PyQt5.QtCore import QTimer, Qt, QPoint, QThread, QObject, pyqtSignal, QMutex, QDir
+from PyQt5.QtCore import QTimer, Qt, QPoint, QThread, QObject, pyqtSignal, QMutex, QDir, QEvent
 from PyQt5.QtGui import QImage, QPixmap
 
 
@@ -47,6 +48,7 @@ class MainWindow(QMainWindow):
         self.magnify_window_size = 50  # Half-size of sampling window in original coordinates
         self.scanner_active_status = False # Scanner status
         self.jump_to_image = False # Jump to image status, True will jump to image tab after selected
+        self.remove_name_mode_status = False # Remove name mode status
 
         # Create tabs
         self.files_tab = QWidget()
@@ -65,6 +67,17 @@ class MainWindow(QMainWindow):
 
         # Declare threads
         self.run_scanner_thread = threading.Thread(target=self.scanner_activated_thread)
+
+        # clickable image label
+        # We'll store the original image dimensions and the ratio
+        self.original_width = 0
+        self.original_height = 0
+        self.scale_ratio_x = 1.0
+        self.scale_ratio_y = 1.0
+
+        # directory
+        self.csv_path = 'csv_speichern'
+        self.csv_edit = 'csv_bearbeiten'
 
 
 
@@ -156,13 +169,16 @@ class MainWindow(QMainWindow):
         self.edit_tab.setLayout(layout) # set layout to the tab
 
         # Horizonal layout for the image display area + magnified preview side-by-side
-        hor_layout = QHBoxLayout() # secondary layout
-        layout.addLayout(hor_layout) # add secondary layout to the main layout
+        self.hor_layout = QHBoxLayout() # secondary layout
+        layout.addLayout(self.hor_layout) # add secondary layout to the main layout
 
 
         self.label_edit_tab = ImageLabel(parent=self)
         self.label_edit_tab.setText("kein Bild ausgewählt")
-        hor_layout.addWidget(self.label_edit_tab, stretch=3)
+        self.hor_layout.addWidget(self.label_edit_tab, stretch=3)
+
+        # Install the event filter so we can catch mouse presses
+        self.label_edit_tab.installEventFilter(self)
 
 
         button_layout = QHBoxLayout() # Control layout
@@ -176,7 +192,7 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(self.scan_button)
 
         remove_name_button = QPushButton("Namen entfernen")
-        # remove_name_button.clicked.connect(self.on_show_info_clicked)
+        remove_name_button.clicked.connect(self.remove_name_mode)
         button_layout.addWidget(remove_name_button)
 
         undo_remove_name_button = QPushButton("Namen entfernen rückgängig")
@@ -199,7 +215,7 @@ class MainWindow(QMainWindow):
         self.magnify_label.setAlignment(Qt.AlignCenter)
         self.magnify_label.setStyleSheet("border: 1px solid black; background-color: #CCC;")
         self.magnify_label.setVisible(False)  # Hidden by default (until magnify is ON)
-        hor_layout.addWidget(self.magnify_label, stretch=1)
+        self.hor_layout.addWidget(self.magnify_label, stretch=1)
 
         # -- Button: Toggle Magnify --
         self.magnify_button = QPushButton("Magnify Mode: OFF")
@@ -301,6 +317,158 @@ class MainWindow(QMainWindow):
             items.append(path)
         return items
 
+    # --------------------------------------------------------------------------
+    # Remove Names Functions
+    # --------------------------------------------------------------------------
+    '''
+    def remove_name_mode(self):
+        try:
+            self.hor_layout.removeWidget(
+                self.clickable_image_label)  # Remove the label_edit_tab in hor_layout if alreay exist
+        except:
+            pass
+
+        self.clickable_image_label = ClickableImageLabel()
+        self.clickable_image_label.setText("{easyTranslate(Click to remove names, DE=Klicken Sie auf, um Namen zu entfernen)}")
+        self.clickable_image_label.clicked_coords.connect(self.fetch_clicked_coords)
+        self.hor_layout.removeWidget(self.label_edit_tab) # Remove the label_edit_tab in hor_layout
+        self.hor_layout.insertWidget(0, self.clickable_image_label) # Add the clickable image label to the top of the hor_layout
+        self.show_image_in_label(self.cv_img_rgb_display, self.clickable_image_label) # Show the clickable image label in the label_edit_tab
+        # self.self.clickable_image_label.set_image(self.cv_img_rgb_display, self.max_size_spin_files_tab.value()) # Set the image to the clickable image label
+        # self.self.clickable_image_label.set_cv_image(self.cv_img_rgb_display, self.max_size_spin_files_tab.value()) # Set the image to the clickable image label
+
+    def fetch_clicked_coords(self, x, y, orig_x, orig_y):
+        """
+        Handle the clicked coordinates.
+        :param x: Clicked x-coordinate in scaled image.
+        :param y: Clicked y-coordinate in scaled image.
+        :param orig_x: Original x-coordinate in full-size image.
+        :param orig_y: Original y-coordinate in full-size image.
+        """
+        print(f"Clicked coordinates (scaled): ({x}, {y})")
+        print(f"Original coordinates: ({orig_x}, {orig_y})")
+
+        # Get the clicked coordinates
+        # self.clicked_coords = (x, y, orig_x, orig_y)
+        # Call the remove_name function
+        '''
+
+    def remove_name_mode(self):
+        if self.remove_name_mode_status == False:
+            self.remove_name_mode_status = True
+            self.show_scanned_names() # Show the scanned names in the image
+        else:
+            self.remove_name_mode_status = False
+        print(f"remove_name_mode status: {self.remove_name_mode_status}")
+        self.find_csv_file_of_image(self.img_name) # Find the csv file of the image if available and update self.current_csv_path
+
+        # open df of csv file
+        self.edit_dataframe = pd.read_csv(self.current_csv_path)
+        # print(self.edit_dataframe) # debugging
+
+    def compare_bbox(self):
+        # print("remove_name function") #debug
+        if self.remove_name_mode_status == True:
+            # Get the clicked coordinates
+            for index, bbox in self.edit_dataframe['bbox'].items():
+                # if bbox is a string then use ast.literal_eval to convert it to a list
+                    if isinstance(bbox, str):
+                        bbox = ast.literal_eval(bbox)# Use if bbox is from csv file
+
+                    if self.orig_x >= bbox[0][0] and self.orig_x <= bbox[2][0] and self.orig_y >= bbox[0][1] and self.orig_y <= bbox[2][1]:
+                        print(f"detected names clicked index: {index}") # debug
+                        self.delete_name(index)
+
+    def delete_name(self, index):
+        deleted_csv_dir = f"{self.csv_edit}/{self.current_csv_path.split('/')[-1].split('.')[0]}_delete.csv"
+        # check if deleted_csv_dir exists
+        if not os.path.exists(deleted_csv_dir):
+            # create the directory if not exists
+            os.makedirs(deleted_csv_dir)
+            # Create the new CSV file with headers
+            with open(deleted_csv_dir, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(['bbox','Namen','Confidence Level','Bildname'])
+
+        # Read all rows from source
+        with open(self.current_csv_path, mode="r", newline="", encoding="utf-8") as src:
+            reader = csv.reader(src)
+            rows = list(reader)
+
+            # Safety check: does the row exist?
+        if row_index_to_move < 0 or row_index_to_move >= len(rows):
+            print(f"Row index {row_index_to_move} is out of range.")
+            return
+
+        # Extract the row we want to move
+        row_to_move = rows.pop(index)
+
+        with open(deleted_csv_dir, mode="a", newline="", encoding="utf-8") as dst:
+            writer = csv.writer(dst)
+            writer.writerow(row_to_move)
+
+        # Move the index row to the deleted csv
+        with open(self.current_csv_path, mode="w", newline="", encoding="utf-8") as src:
+            writer = csv.writer(src)
+            writer.writerow(rows)
+
+        print(f"Moved row {row_index_to_move} from '{source_file}' to '{dest_file}'.")
+
+
+        # Remove the name from the dataframe
+        self.edit_dataframe.drop(index, inplace=True)
+        # Save the dataframe to csv
+        self.edit_dataframe.to_csv(self.current_csv_path, index=False)
+        print(f"deleted name index: {index}")
+
+        self.show_scanned_names()  # Show the scanned names in the image
+
+
+
+    def eventFilter(self, source, event):
+        """
+        This method is called for every event on 'source' (label_image).
+        We look for a MouseButtonPress, compute the click coordinates,
+        and optionally map them back to the original image.
+        """
+        if source == self.label_edit_tab and event.type() == QEvent.MouseButtonPress:
+            # Make sure we have a pixmap
+            pixmap = self.label_edit_tab.pixmap()
+            if pixmap is not None:
+                # Where did the click happen (relative to label)?
+                click_x = event.pos().x()
+                click_y = event.pos().y()
+
+                pixmap_w = pixmap.width()
+                pixmap_h = pixmap.height()
+
+                label_w = self.label_edit_tab.width()
+                label_h = self.label_edit_tab.height()
+
+                # If the image is centered, find offset
+                offset_x = (label_w - pixmap_w) // 2
+                offset_y = (label_h - pixmap_h) // 2
+
+                # Check if within the displayed pixmap
+                if (offset_x <= click_x < offset_x + pixmap_w and
+                        offset_y <= click_y < offset_y + pixmap_h):
+                    scaled_x = click_x - offset_x
+                    scaled_y = click_y - offset_y
+
+                    # Map to original
+                    self.orig_x = int(scaled_x * (self.cv_img_rgb_original.shape[0] / self.cv_img_rgb_display.shape[0]))
+                    self.orig_y = int(scaled_y * (self.cv_img_rgb_original.shape[1] / self.cv_img_rgb_display.shape[1]))
+
+                    print(f"Clicked scaled=({scaled_x}, {scaled_y}), original=({self.orig_x}, {self.orig_y})")
+
+                    self.compare_bbox() # Remove name function
+
+
+            # Mark event as handled
+            return True
+
+        # Otherwise, default handling
+        return super().eventFilter(source, event)
 
 
     # --------------------------------------------------------------------------
@@ -421,7 +589,6 @@ class MainWindow(QMainWindow):
             # Store full path so we can open the image later
             item.setData(0, Qt.UserRole, item)
             self.image_tree_widget.addTopLevelItem(item)
-
 
 
     def open_image_folder(self):
@@ -641,12 +808,10 @@ class MainWindow(QMainWindow):
         self.scan_button.setEnabled(True)
 
     def show_scanned_names(self):
-        csv_path = 'csv_speichern'
-
         # Get file name from the image path
         file_name = self.img_name.split('/')[-1].split('.')[0]
 
-        self.current_csv_path = f'{csv_path}/{file_name}.csv' # update current csv path
+        self.current_csv_path = f'{self.csv_path}/{file_name}.csv' # update current csv path
 
         self.opened_csv_file = pd.read_csv(self.current_csv_path)
 
