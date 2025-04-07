@@ -302,7 +302,7 @@ class MainWindow(QMainWindow):
 
         return cv_img_rgb_display, disp_width, disp_height
 
-    def resize_window(self, loc_x=500, loc_y=100, disp_width=800, disp_height=800):
+    def resize_window(self, loc_x=800, loc_y=100, disp_width=800, disp_height=800):
         self.setGeometry(loc_x, loc_y, disp_width, disp_height)  # Set window location
 
     def fetch_top_level_tree_items(self, tree_widget):
@@ -320,45 +320,13 @@ class MainWindow(QMainWindow):
     # --------------------------------------------------------------------------
     # Remove Names Functions
     # --------------------------------------------------------------------------
-    '''
-    def remove_name_mode(self):
-        try:
-            self.hor_layout.removeWidget(
-                self.clickable_image_label)  # Remove the label_edit_tab in hor_layout if alreay exist
-        except:
-            pass
-
-        self.clickable_image_label = ClickableImageLabel()
-        self.clickable_image_label.setText("{easyTranslate(Click to remove names, DE=Klicken Sie auf, um Namen zu entfernen)}")
-        self.clickable_image_label.clicked_coords.connect(self.fetch_clicked_coords)
-        self.hor_layout.removeWidget(self.label_edit_tab) # Remove the label_edit_tab in hor_layout
-        self.hor_layout.insertWidget(0, self.clickable_image_label) # Add the clickable image label to the top of the hor_layout
-        self.show_image_in_label(self.cv_img_rgb_display, self.clickable_image_label) # Show the clickable image label in the label_edit_tab
-        # self.self.clickable_image_label.set_image(self.cv_img_rgb_display, self.max_size_spin_files_tab.value()) # Set the image to the clickable image label
-        # self.self.clickable_image_label.set_cv_image(self.cv_img_rgb_display, self.max_size_spin_files_tab.value()) # Set the image to the clickable image label
-
-    def fetch_clicked_coords(self, x, y, orig_x, orig_y):
-        """
-        Handle the clicked coordinates.
-        :param x: Clicked x-coordinate in scaled image.
-        :param y: Clicked y-coordinate in scaled image.
-        :param orig_x: Original x-coordinate in full-size image.
-        :param orig_y: Original y-coordinate in full-size image.
-        """
-        print(f"Clicked coordinates (scaled): ({x}, {y})")
-        print(f"Original coordinates: ({orig_x}, {orig_y})")
-
-        # Get the clicked coordinates
-        # self.clicked_coords = (x, y, orig_x, orig_y)
-        # Call the remove_name function
-        '''
-
     def remove_name_mode(self):
         if self.remove_name_mode_status == False:
             self.remove_name_mode_status = True
             self.show_scanned_names() # Show the scanned names in the image
         else:
             self.remove_name_mode_status = False
+            self.show_scanned_names()  # Show the scanned names in the image
         print(f"remove_name_mode status: {self.remove_name_mode_status}")
         self.find_csv_file_of_image(self.img_name) # Find the csv file of the image if available and update self.current_csv_path
 
@@ -381,10 +349,11 @@ class MainWindow(QMainWindow):
 
     def delete_name(self, index):
         deleted_csv_dir = f"{self.csv_edit}/{self.current_csv_path.split('/')[-1].split('.')[0]}_delete.csv"
+        print(deleted_csv_dir) # debug
         # check if deleted_csv_dir exists
         if not os.path.exists(deleted_csv_dir):
             # create the directory if not exists
-            os.makedirs(deleted_csv_dir)
+            # os.makedirs(deleted_csv_dir)
             # Create the new CSV file with headers
             with open(deleted_csv_dir, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
@@ -396,23 +365,23 @@ class MainWindow(QMainWindow):
             rows = list(reader)
 
             # Safety check: does the row exist?
-        if row_index_to_move < 0 or row_index_to_move >= len(rows):
-            print(f"Row index {row_index_to_move} is out of range.")
+        if index < 0 or index >= len(rows):
+            # print(f"Row index {index} is out of range.")
             return
 
         # Extract the row we want to move
-        row_to_move = rows.pop(index)
+        row_to_move = rows.pop(index+1)
 
         with open(deleted_csv_dir, mode="a", newline="", encoding="utf-8") as dst:
             writer = csv.writer(dst)
             writer.writerow(row_to_move)
 
         # Move the index row to the deleted csv
-        with open(self.current_csv_path, mode="w", newline="", encoding="utf-8") as src:
-            writer = csv.writer(src)
-            writer.writerow(rows)
+        # with open(self.current_csv_path, mode="w", newline="", encoding="utf-8") as src:
+        #     writer = csv.writer(src)
+        #     writer.writerow(rows)
 
-        print(f"Moved row {row_index_to_move} from '{source_file}' to '{dest_file}'.")
+        # print(f"Moved row {index+1} from '{self.current_csv_path}' to '{deleted_csv_dir}'.") # debug
 
 
         # Remove the name from the dataframe
@@ -421,7 +390,8 @@ class MainWindow(QMainWindow):
         self.edit_dataframe.to_csv(self.current_csv_path, index=False)
         print(f"deleted name index: {index}")
 
-        self.show_scanned_names()  # Show the scanned names in the image
+        # time.sleep(0.5)
+        self.show_scanned_names()  # update the image with the new dataframe
 
 
 
@@ -498,6 +468,8 @@ class MainWindow(QMainWindow):
 
                 #Store the scaled / unchanged result in the instance variable:
                 self.cv_img_rgb_display = cv_img_rgb_display
+                # Store the clean version
+                self.cv_img_rgb_display_clean = cv_img_rgb_display.copy()
 
                 # REsize the window
                 self.resize_window(disp_width=disp_width, disp_height=disp_height)
@@ -521,6 +493,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Error", "Failed to load image.")
 
         self.show_image_info_in_tree(self.img_name) # Show image info in the tree widget
+        self.show_scanned_names()  # Show the scanned names in the image
 
 
     def only_open_image(self, image_directory):
@@ -813,9 +786,13 @@ class MainWindow(QMainWindow):
 
         self.current_csv_path = f'{self.csv_path}/{file_name}.csv' # update current csv path
 
-        self.opened_csv_file = pd.read_csv(self.current_csv_path)
+        self.edit_dataframe = pd.read_csv(self.current_csv_path)
+        # print("current edit_dataframe: ", self.edit_dataframe) # debug
 
-        df_ocr_results = self.opened_csv_file
+        df_ocr_results = self.edit_dataframe
+
+        # clear the image display
+        self.cv_img_rgb_display = self.cv_img_rgb_display_clean.copy()  # Replace with clean version
 
         for bbox in df_ocr_results['bbox']:
             # if bbox is a string then use ast.literal_eval to convert it to a list
