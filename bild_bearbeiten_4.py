@@ -958,6 +958,10 @@ class MainWindow(QMainWindow):
             print("No file path available to save.")
             return
 
+        #check if the csv_speichern directory exists
+        if not os.path.exists(self.csv_path):
+            os.makedirs(self.csv_path)
+
         # Gather data from each top-level item
         num_top_items = self.csv_tree_widget.topLevelItemCount()
         num_columns = self.csv_tree_widget.columnCount()
