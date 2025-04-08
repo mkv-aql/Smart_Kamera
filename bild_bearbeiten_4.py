@@ -4,6 +4,7 @@ __author__ = 'mkv-aql'
 import cv2, csv, ast, time, threading, os, sys
 import pandas as pd
 from pygments import highlight
+#comment
 
 from Modules.class_clickable_image_V1 import ClickableImageLabel # For clickable image label
 from Modules.class_highlight import RectangleSelector as rs #For highlighting module
