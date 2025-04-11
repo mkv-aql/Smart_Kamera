@@ -192,9 +192,9 @@ class MainWindow(QMainWindow):
         self.scan_button.clicked.connect(self.scan_image)
         button_layout.addWidget(self.scan_button)
 
-        remove_name_button = QPushButton("Namen entfernen")
-        remove_name_button.clicked.connect(self.remove_name_mode)
-        button_layout.addWidget(remove_name_button)
+        self.remove_name_button = QPushButton("Namen entfernen")
+        self.remove_name_button.clicked.connect(self.remove_name_mode)
+        button_layout.addWidget(self.remove_name_button)
 
         undo_remove_name_button = QPushButton("Namen entfernen rückgängig")
         # undo_remove_name_button.clicked.connect(self.on_show_info_clicked)
@@ -324,9 +324,11 @@ class MainWindow(QMainWindow):
     def remove_name_mode(self):
         if self.remove_name_mode_status == False:
             self.remove_name_mode_status = True
+            self.remove_name_button.setText("Namen entfernen: aktiviert") # change button text
             self.show_scanned_names() # Show the scanned names in the image
         else:
             self.remove_name_mode_status = False
+            self.remove_name_button.setText("Namen entfernen") # change button text
             self.show_scanned_names()  # Show the scanned names in the image
         print(f"remove_name_mode status: {self.remove_name_mode_status}")
         self.find_csv_file_of_image(self.img_name) # Find the csv file of the image if available and update self.current_csv_path
@@ -493,9 +495,28 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.warning(self, "Error", "Failed to load image.")
 
-        self.show_image_info_in_tree(self.img_name) # Show image info in the tree widget
-        self.show_scanned_names()  # Show the scanned names in the image
+        self.show_image_info_in_tree(self.img_name)  # Show image info in the tree widget
+        if self.image_csv_finder(): # check if csv file exists
+            self.show_scanned_names()  # Show the scanned names in the image
 
+    def image_csv_finder(self):
+        """
+        Check if the csv file exists or not
+        """
+        # print(f'image_csv_finder running') # debugging
+        # print(f'img_name: {self.img_name}') # Debugging
+
+        # Get the filename from the full path
+        file_name = self.img_name.split('/')[-1].split('.')[0] # Get the filename from the full path
+        # print(f'file_name: {file_name}') # Debugging
+
+        self.current_csv_path = f'{self.csv_path}/{file_name}.csv'  # update current csv path
+
+        if os.path.exists(self.current_csv_path):
+            return True
+        else:
+            print(f'csv file not found: {self.current_csv_path}') # Debugging
+            return False
 
     def only_open_image(self, image_directory):
         """
@@ -517,6 +538,9 @@ class MainWindow(QMainWindow):
                 # Store the scaled / unchanged result in the instance variable:
                 self.cv_img_rgb_display = cv_img_rgb_display
 
+                # Store the clean version
+                self.cv_img_rgb_display_clean = cv_img_rgb_display.copy()
+
                 # REsize the window
                 self.resize_window(disp_width=disp_width, disp_height=disp_height)
 
@@ -532,7 +556,7 @@ class MainWindow(QMainWindow):
 
     def show_image_info_in_tree(self, image_directory):
         """
-        Show image info in the tree widget
+        Show image info in the tree widget, basically show image name in the image tree widget
         """
         filename = QDir.fromNativeSeparators(image_directory)  # convert back slash to forward slash in directory string
         filename = filename.split('/')[-1] # Get the filename from the full path
@@ -604,11 +628,16 @@ class MainWindow(QMainWindow):
         file_path = item.data(0, Qt.UserRole)
         file_path = QDir.fromNativeSeparators(file_path) # convert back slash to forward slash in directory string
         # print(f'image tree double click file_path: {file_path}') # debugging
+        self.img_name = file_path # update img_name with the selected image path
         # print(f'image tree double click self.img_name: {self.img_name}') # debugging
 
         # Find the csv file of the image if available
-        self.find_csv_file_of_image(file_path)
-        self.update_tree(self.current_csv_path)  # update tree with new data from scanned image
+        # self.find_csv_file_of_image(file_path) # Redundant, delete later
+        if self.image_csv_finder():  # check if csv file exists
+            self.update_tree(self.current_csv_path)  # update tree with new data from scanned image
+        else:
+            self.update_tree('no_csv') # update tree with no csv file
+
 
         # clear any bold texts
         self.highlight_selected_item(item, column)
@@ -784,6 +813,7 @@ class MainWindow(QMainWindow):
     def show_scanned_names(self):
         # Get file name from the image path
         file_name = self.img_name.split('/')[-1].split('.')[0]
+        # print(f'file_name: {file_name}') # debug
 
         self.current_csv_path = f'{self.csv_path}/{file_name}.csv' # update current csv path
 
@@ -810,7 +840,10 @@ class MainWindow(QMainWindow):
 
         self.show_image_in_label(self.cv_img_rgb_display, self.label_edit_tab)
 
-        self.update_tree(self.current_csv_path) #update tree with new data from scanned image
+        if self.image_csv_finder():  # check if csv file exists
+            self.update_tree(self.current_csv_path) #update tree with new data from scanned image
+
+
 
 
     def scan_image_thread(self, img_name_local, batch_scanning=False):
@@ -875,6 +908,14 @@ class MainWindow(QMainWindow):
 
 
     def update_tree(self, file_path):
+        """
+        If the file path is 'no_csv', clear the tree widget.
+        Else, read the CSV file and populate the tree widget.
+        """
+        if file_path == 'no_csv':
+            self.csv_tree_widget.clear()
+            return
+
         # Read the CSV file
         rows = []
         with open(file_path, newline='', encoding='utf-8') as f:
