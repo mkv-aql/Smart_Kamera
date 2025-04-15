@@ -79,7 +79,10 @@ class MainWindow(QMainWindow):
         # directory
         self.csv_path = 'csv_speichern'
         self.csv_edit = 'csv_bearbeiten'
+        self.bilder_path = 'bilder'
 
+        # Create directories if not exists
+        self.create_folder()
 
 
     # --------------------------------------------------------------------------
