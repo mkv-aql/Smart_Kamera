@@ -21,10 +21,10 @@ from PyQt5.QtWidgets import (
     QComboBox, QCalendarWidget, QTabWidget, QTableWidget,
     QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QMenuBar,
     QMenu, QAction, QToolBar, QStatusBar, QMessageBox,
-    QFileDialog, QColorDialog, QFontDialog, QInputDialog, QAbstractItemView, QProgressDialog
+    QFileDialog, QColorDialog, QFontDialog, QInputDialog, QAbstractItemView, QProgressDialog, QTreeView
 )
 from PyQt5.QtCore import QTimer, Qt, QPoint, QThread, QObject, pyqtSignal, QMutex, QDir, QEvent
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtGui import QImage, QPixmap, QStandardItemModel
 
 
 class MainWindow(QMainWindow):
@@ -98,10 +98,16 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(form_layout)
 
+        # ------------- Shared data model -------------
+        # self.csv_model = QStandardItemModel() # for duplicate model
+        # self.csv_model.setHorizontalHeaderLabels(['bbox', 'Namen', 'Confidence Level', 'Bildname'])
+
 
         # ------------- CSV Tree widget -------------
         self.csv_tree_widget = QTreeWidget()
-        self.csv_tree_widget.setHeaderLabels(["Bildname", "Namen", "Bbox"])
+        # self.csv_tree_widget = QTreeView() # Changed to QTreeView to have duplicate in the edit tab
+        self.csv_tree_widget.setHeaderLabels(["Bildname", "Namen", "Bbox"]) # Removed for duplicate only, set in the model to have duplicate
+        # self.csv_tree_widget.setModel(self.csv_model) # for duplicate model
         # Make items editable by double-click:
         self.csv_tree_widget.setEditTriggers(QAbstractItemView.DoubleClicked)
         layout.addWidget(self.csv_tree_widget)
@@ -173,6 +179,15 @@ class MainWindow(QMainWindow):
         self.hor_layout = QHBoxLayout() # secondary layout
         layout.addLayout(self.hor_layout) # add secondary layout to the main layout
 
+        # # ------------- Shared data model -------------
+        # self.model = QStandardItemModel()
+        # self.model.setHorizontalHeaderLabels(['bbox', 'Namen', 'Confidence Level', 'Bildname'])
+        # self.extra_tree_view = QTreeWidget()
+        # self.extra_tree_view.setMaximumSize(200, 300)  # Set a maximum size for the extra tree view
+        # self.extra_tree_view.setModel(self.model)
+        # self.extra_tree_view.setColumnHidden(1, True)  # Hide 2nd column to show only certain columns
+        # layout.addWidget(self.extra_tree_view)
+
 
         self.label_edit_tab = ImageLabel(parent=self)
         self.label_edit_tab.setText("kein Bild ausgewählt")
@@ -200,9 +215,9 @@ class MainWindow(QMainWindow):
         # undo_remove_name_button.clicked.connect(self.on_show_info_clicked)
         button_layout.addWidget(undo_remove_name_button)
 
-        self.save_image_button = QPushButton("Namen speichern")
+        # self.save_image_button = QPushButton("Namen speichern")
         # self.save_image_button.clicked.connect(self.save_image_and_update_csv)
-        button_layout.addWidget(self.save_image_button)
+        # button_layout.addWidget(self.save_image_button)
 
         # Add the buttons to the layout
         layout.addLayout(button_layout)
@@ -969,10 +984,13 @@ class MainWindow(QMainWindow):
         }
 
         # Clear existing items (in case you're re-calling this)
-        self.csv_tree_widget.clear()
+        self.csv_tree_widget.clear() # using QTreeWidget
 
         # Re-set column headers (optional, only if changed)
-        self.csv_tree_widget.setHeaderLabels(["Bildname", "Namen", "Bbox"])
+        self.csv_tree_widget.setHeaderLabels(["Bildname", "Namen", "Bbox"]) # using QTreeWidget
+
+        # self.csv_model.clear() # used for QTreeView, instead of QTreeWidget
+        # self.csv_model.setHorizontalHeaderLabels(["Bildname", "Namen", "Bbox"]) # used for QTreeView, instead of QTreeWidget
 
         for file_name, data in example_dict.items():
             root_item = QTreeWidgetItem([file_name, "", ""])
@@ -1040,6 +1058,25 @@ class MainWindow(QMainWindow):
             # If the csv file exists, open it
             self.current_csv_path = f'{csv_folder}/{csv_file_name}'
             # print(f'csv file exists: {self.current_csv_path}')  # debugging
+
+
+    def create_folder(self):
+        """
+        Create 'bilder', 'csv_bearbeiten' and 'csv_speichern' folders if they don't exist
+
+        :return:
+
+        """
+        # Check if the folders exist
+        if not os.path.exists(self.bilder_path):
+            os.makedirs(self.bilder_path)
+
+        if not os.path.exists(self.csv_edit):
+            os.makedirs(self.csv_edit)
+
+        if not os.path.exists(self.csv_path):
+            os.makedirs(self.csv_path)
+
 
 
 
