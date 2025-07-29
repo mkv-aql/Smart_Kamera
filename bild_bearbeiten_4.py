@@ -15,15 +15,18 @@ from Modules.class_magnification_feature import ImageLabel #For magnification mo
 
 from PyQt5 import QtGui
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QDialog,
-    QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
-    QLabel, QLineEdit, QPushButton, QSpinBox, QDoubleSpinBox,
-    QComboBox, QCalendarWidget, QTabWidget, QTableWidget,
-    QTableWidgetItem, QTreeWidget, QTreeWidgetItem, QMenuBar,
-    QMenu, QAction, QToolBar, QStatusBar, QMessageBox,
-    QFileDialog, QColorDialog, QFontDialog, QInputDialog, QAbstractItemView, QProgressDialog, QTreeView
+    QApplication, QMainWindow, QWidget,
+    QVBoxLayout, QHBoxLayout,  QFormLayout,
+    QLabel, QLineEdit, QPushButton, QSpinBox, QTabWidget,
+    QTreeWidget, QTreeWidgetItem, QMessageBox,QFileDialog, QAbstractItemView,
+    QTableWidgetItem, QComboBox, QCalendarWidget, QTableWidget, QDoubleSpinBox,
+    QMenuBar, QMenu, QAction, QToolBar, QStatusBar, QGridLayout,
+    QColorDialog, QFontDialog, QInputDialog,
+    QProgressDialog, QTreeView, QDialog,
 )
-from PyQt5.QtCore import QTimer, Qt, QPoint, QThread, QObject, pyqtSignal, QMutex, QDir, QEvent
+from PyQt5.QtCore import (Qt, QPoint, QDir, QEvent,
+                          QThread, QObject, pyqtSignal, QMutex, QTimer,
+                          )
 from PyQt5.QtGui import QImage, QPixmap, QStandardItemModel
 
 
@@ -34,7 +37,9 @@ class MainWindow(QMainWindow):
         # Basic window setup
         self.setWindowTitle("Klingelschild-Reiniger")
         self.setGeometry(1000, 100, int(width*scale), int(height*scale)) # Set window location
-        self.setWindowIcon(QtGui.QIcon("icon/DGN_Bildmarke_orange_rgb.png"))
+        # self.setWindowIcon(QtGui.QIcon("icon/DGN_Bildmarke_orange_rgb.png"))
+        self.logo_path = self.resource_path("icon/DGN_Bildmarke_orange_rgb.png") # for pyinstaller to detect icon
+        self.setWindowIcon(QtGui.QIcon(self.logo_path))
 
 
         # Create a central widget which will hold a QTabWidget with multiple tabs
@@ -84,6 +89,11 @@ class MainWindow(QMainWindow):
         # Create directories if not exists
         self.create_folder()
 
+    # For pyinstaller to detect icon png
+    def resource_path(self, relative_path):
+        if hasattr(sys, '_MEIPASS'):
+            return os.path.join(sys._MEIPASS, relative_path)
+        return os.path.join(os.path.abspath("."), relative_path)
 
     # --------------------------------------------------------------------------
     # Tabs Setup
@@ -168,6 +178,9 @@ class MainWindow(QMainWindow):
         scan_all_image_button = QPushButton("Alle Bilder scannen ")
         scan_all_image_button.clicked.connect(self.scan_all_image)
         button_layout.addWidget(scan_all_image_button)
+
+        setup_button = QPushButton("Einstellungen")
+        button_layout.addWidget(setup_button)
 
         layout.addLayout(button_layout)
 
