@@ -6,10 +6,12 @@ import pandas as pd
 from pygments import highlight
 #comment
 
-from Modules.class_clickable_image_V1 import ClickableImageLabel # For clickable image label
-from Modules.class_highlight import RectangleSelector as rs #For highlighting module
-from Modules.class_cutout import ImageCutoutSaver as ics #For cutout module
-from Modules.class_entry_input_2 import CsvEditor as ei #For entry input module
+## OLD DEAD MODULES
+# from Modules.class_clickable_image_V1 import ClickableImageLabel # For clickable image label
+# from Modules.class_highlight import RectangleSelector as rs #For highlighting module
+# from Modules.class_cutout import ImageCutoutSaver as ics #For cutout module
+# from Modules.class_entry_input_2 import CsvEditor as ei #For entry input module
+
 # from Modules.class_easyOCR_V1 import OCRProcessor # for ocr detection, Moved to run_detection() function for faster app
 from Modules.class_magnification_feature import ImageLabel #For magnification module
 
@@ -19,10 +21,10 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout,  QFormLayout,
     QLabel, QLineEdit, QPushButton, QSpinBox, QTabWidget,
     QTreeWidget, QTreeWidgetItem, QMessageBox,QFileDialog, QAbstractItemView,
-    QTableWidgetItem, QComboBox, QCalendarWidget, QTableWidget, QDoubleSpinBox,
-    QMenuBar, QMenu, QAction, QToolBar, QStatusBar, QGridLayout,
-    QColorDialog, QFontDialog, QInputDialog,
-    QProgressDialog, QTreeView, QDialog,
+    # QTableWidgetItem, QComboBox, QCalendarWidget, QTableWidget, QDoubleSpinBox,
+    # QMenuBar, QMenu, QAction, QToolBar, QStatusBar, QGridLayout,
+    # QColorDialog, QFontDialog, QInputDialog,
+    # QProgressDialog, QTreeView, QDialog,
 )
 from PyQt5.QtCore import (Qt, QPoint, QDir, QEvent,
                           QThread, QObject, pyqtSignal, QMutex, QTimer,
@@ -104,7 +106,7 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         self.files_tab.setLayout(layout)
 
-        # Example of form-like layout
+        # form-like layout
         name_line_edit = QLineEdit()
         form_layout = QFormLayout()
         form_layout.addRow("Name:", name_line_edit)
@@ -180,6 +182,7 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(scan_all_image_button)
 
         setup_button = QPushButton("Einstellungen")
+        # setup_button.clicked.connect(self.setup_app)
         button_layout.addWidget(setup_button)
 
         layout.addLayout(button_layout)
