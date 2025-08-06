@@ -1,5 +1,5 @@
 __author__ = 'mkv-aql'
-
+# v4.1.0: scanner deactivatable, mirrored csv editor in bild-bearbeiten tab
 # import nothing
 import cv2, csv, ast, time, threading, os, sys, json
 import pandas as pd
@@ -20,16 +20,16 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QTextEdit,
     QVBoxLayout, QHBoxLayout,  QFormLayout,
     QLabel, QLineEdit, QPushButton, QSpinBox, QTabWidget,
-    QTreeWidget, QTreeWidgetItem, QMessageBox,QFileDialog, QAbstractItemView,
+    QTreeWidget, QTreeWidgetItem, QMessageBox,QFileDialog, QAbstractItemView, QTreeView,
     # QTableWidgetItem, QComboBox, QCalendarWidget, QTableWidget, QDoubleSpinBox,
     # QMenuBar, QMenu, QAction, QToolBar, QStatusBar, QGridLayout,
     # QColorDialog, QFontDialog, QInputDialog,
-    # QProgressDialog, QTreeView, QDialog,
+    # QProgressDialog, , QDialog,
 )
 from PyQt5.QtCore import (Qt, QPoint, QDir, QEvent,
                           QThread, QObject, pyqtSignal, QMutex, QTimer,
                           )
-from PyQt5.QtGui import QImage, QPixmap, QStandardItemModel
+from PyQt5.QtGui import QImage, QPixmap, QStandardItemModel, QStandardItem
 
 
 class MainWindow(QMainWindow):
@@ -68,13 +68,17 @@ class MainWindow(QMainWindow):
         self.central_widget.addTab(self.files_tab, "Arbeitsplatz")
         self.central_widget.addTab(self.edit_tab, "Bild-Bearbeiten")
 
+        # for mirror versions of csv editor for arbetisplatz and bild-bearbeiten tabs, must be called before init tabs
+        self.csv_model = QStandardItemModel()
+        self.csv_model.setHorizontalHeaderLabels(['bbox', 'Namen', 'Confidence Level', 'Bildname'])
+
         # Initialize and add tabs
         self.init_files_tab()
         self.init_edit_tab()
         self.init_test_tab()
 
-        # Declare threads
-        self.run_scanner_thread = threading.Thread(target=self.scanner_activated_thread)
+        # Declare threads removed for new scanner actiovation function
+        # self.run_scanner_thread = threading.Thread(target=self.scanner_activated_thread)
 
         # clickable image label
         # original image dimensions and ratio
@@ -93,6 +97,8 @@ class MainWindow(QMainWindow):
         self.create_folder()
         # Load config file json
         self.load_config_file()
+
+
 
     # For pyinstaller to detect icon png
     def resource_path(self, relative_path):
@@ -122,13 +128,18 @@ class MainWindow(QMainWindow):
 
 
         # ------------- CSV Tree widget -------------
-        self.csv_tree_widget = QTreeWidget()
-        # self.csv_tree_widget = QTreeView() # Changed to QTreeView to have duplicate in the edit tab
-        self.csv_tree_widget.setHeaderLabels(["Bildname", "Namen", "Bbox"]) # Removed for duplicate only, set in the model to have duplicate
+        # self.csv_tree_widget = QTreeWidget() # For single non mirrored version
+
+        # self.csv_tree_widget.setHeaderLabels(["Bildname", "Namen", "Bbox"]) # Removed for duplicate only, set in the model to have duplicate
         # self.csv_tree_widget.setModel(self.csv_model) # for duplicate model
         # Make items editable by double-click:
-        self.csv_tree_widget.setEditTriggers(QAbstractItemView.DoubleClicked)
-        layout.addWidget(self.csv_tree_widget)
+        # self.csv_tree_widget.setEditTriggers(QAbstractItemView.DoubleClicked) # for non mirrored version
+        # layout.addWidget(self.csv_tree_widget) # for single non mirrored version
+
+        self.csv_tree_view = QTreeView()  # Changed to QTreeView to have duplicate in the edit tab
+        self.csv_tree_view.setModel(self.csv_model)  # for duplicate/mirror version
+        self.csv_tree_view.setEditTriggers(QAbstractItemView.DoubleClicked)  # for duplicate/mirror version
+        layout.addWidget(self.csv_tree_view) # for duplicate/mirror version
         # Populate from example_dict on startup
         self.populate_tree_from_dict()
 
@@ -201,7 +212,7 @@ class MainWindow(QMainWindow):
         self.hor_layout = QHBoxLayout() # secondary layout
         layout.addLayout(self.hor_layout) # add secondary layout to the main layout
 
-        # # ------------- Shared data model -------------
+        # # ------------- Shared data model / mirrored version -------------
         # self.model = QStandardItemModel()
         # self.model.setHorizontalHeaderLabels(['bbox', 'Namen', 'Confidence Level', 'Bildname'])
         # self.extra_tree_view = QTreeWidget()
@@ -210,6 +221,18 @@ class MainWindow(QMainWindow):
         # self.extra_tree_view.setColumnHidden(1, True)  # Hide 2nd column to show only certain columns
         # layout.addWidget(self.extra_tree_view)
 
+        self.csv_mirror_view = QTreeView()
+        self.csv_mirror_view.setModel(self.csv_model)
+        self.csv_mirror_view.setEditTriggers(QAbstractItemView.DoubleClicked)
+        self.csv_mirror_view.setMaximumHeight(150)
+        self.csv_mirror_view.setAlternatingRowColors(True)
+
+        # Hide all columns except 'Namen' (index 1)
+        for i in range(self.csv_model.columnCount()):
+            self.csv_mirror_view.setColumnHidden(i, i != 1)
+
+        layout.addWidget(self.csv_mirror_view)
+        # ----------------------------------------------
 
         self.label_edit_tab = ImageLabel(parent=self)
         self.label_edit_tab.setText("kein Bild ausgewählt")
@@ -797,6 +820,8 @@ class MainWindow(QMainWindow):
         """
         # self.run_scanner_thread = threading.Thread(target=self.scanner_activated_thread)
 
+        # Old activation function
+        '''
         if self.scanner_active_status == False:
             self.activate_scanner_button.setText("Scanner deaktivieren") # Change button text
             self.scanner_active_status = True
@@ -809,6 +834,28 @@ class MainWindow(QMainWindow):
             self.run_scanner_thread.join()
             self.ocr_processor = None  # Clear the OCR processor
             print("Scanner deactivated")
+        '''
+
+        # New scanner activation function
+        if not self.scanner_active_status:
+            self.activate_scanner_button.setText("Scanner lädt...")
+            QApplication.processEvents()  # GUI responsive during loading /lädt
+
+            try:
+                from Modules.class_easyOCR_V1 import OCRProcessor
+                self.ocr_processor = OCRProcessor()
+                self.scanner_active_status = True
+                self.activate_scanner_button.setText("Scanner deaktivieren")
+                print("Scanner aktiviert")
+            except Exception as e:
+                QMessageBox.critical(self, "Fehler", f"OCR-Modul konnte nicht geladen werden:\n{e}")
+                self.activate_scanner_button.setText("Scanner aktivieren")
+        else:
+            # Deactivate scanner
+            self.ocr_processor = None
+            self.scanner_active_status = False
+            self.activate_scanner_button.setText("Scanner aktivieren")
+            print("Scanner deaktiviert")
 
     def scanner_activated_thread(self):
         """
@@ -818,7 +865,8 @@ class MainWindow(QMainWindow):
         :return: None
         """
 
-
+        # old scanner fucntion
+        '''
         self.activate_scanner_button.setText("Scanner lädt")  # Just to show loading status
         modulename = 'OCRProcessor'
         if modulename not in sys.modules:
@@ -827,7 +875,7 @@ class MainWindow(QMainWindow):
         self.ocr_processor = OCRProcessor()
         self.activate_scanner_button.setText("Scanner deaktivieren")  # Change button text
         print('ocr_processor initialized')
-
+        '''
 
     def scan_image(self, batch_scanning=False):
         print("Scan image clicked")
@@ -896,9 +944,16 @@ class MainWindow(QMainWindow):
         # save_path = 'csv_speichern'
 
         # new dynamic version path, and check floder if vorhanden
-        save_path = self.csv_path if self.csv_path else os.path.dirname(img_name_local)#
-        if not os.path.exists(save_path):
-            os.makedirs(save_path, exist_ok=True)
+        # save_path = self.csv_path if self.csv_path else os.path.dirname(img_name_local)#
+        # if not os.path.exists(save_path):
+        #     os.makedirs(save_path, exist_ok=True)
+        # if save path for csv not set, save next to the images
+        if self.csv_path and os.path.isdir(self.csv_path):
+            save_path = self.csv_path
+        else:
+            # Fallback to the image directory if config not set or invalid
+            save_path = os.path.dirname(img_name_local)
+            print(f"[Info] csv_path not set. Saving to image folder: {save_path}")
 
         # Save the OCR results to a CSV file
         self.ocr_processor.save_to_csv(df_ocr_results, img_name_local, save_path)
@@ -950,14 +1005,15 @@ class MainWindow(QMainWindow):
         self.update_tree(self.current_csv_path)
 
 
-
+    # old update_tree for non mirrored version of tree
+    '''
     def update_tree(self, file_path):
         """
         If the file path is 'no_csv', clear the tree widget.
         Else, read the CSV file and populate the tree widget.
         """
         if file_path == 'no_csv':
-            self.csv_tree_widget.clear()
+            self.csv_tree_widget.clear() # For single
             return
 
         # Read the CSV file
@@ -996,7 +1052,37 @@ class MainWindow(QMainWindow):
 
             # We add it as a top-level item, but you could also place it under some root
             self.csv_tree_widget.addTopLevelItem(item)
+    '''
+    # new version of update tree for mirrored version of csv tree
+    def update_tree(self, file_path):
+        if file_path == 'no_csv':
+            self.csv_model.removeRows(0, self.csv_model.rowCount())
+            return
 
+        # Read the CSV
+        with open(file_path, newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            rows = list(reader)
+
+        if not rows:
+            return
+
+        self.csv_model.removeRows(0, self.csv_model.rowCount())  # Clear existing data
+
+        header = ['bbox', 'Namen', 'Confidence Level', 'Bildname']
+        self.csv_model.setHorizontalHeaderLabels(header)
+        rows = rows[1:]  # skip header row
+
+        for row_data in rows:
+            while len(row_data) < 4:
+                row_data.append("")
+            items = [QStandardItem(col) for col in row_data[:4]]
+            for item in items:
+                item.setEditable(True)
+            self.csv_model.appendRow(items)
+
+    # old non mirrored version
+    '''
     def populate_tree_from_dict(self):
         """
         Populate the QTreeWidget from a hard-coded dictionary (example_dict).
@@ -1032,7 +1118,36 @@ class MainWindow(QMainWindow):
                 # Make the child item editable:
                 child_item.setFlags(child_item.flags() | Qt.ItemIsEditable)
                 root_item.addChild(child_item)
+    '''
+    # new mirrored version for populate_tree_from_dict
+    def populate_tree_from_dict(self):
+        """
+        Populate the shared QStandardItemModel from a hard-coded dictionary (example_dict).
+        Each entry becomes a new row in the model.
+        """
+        example_dict = {
+            "Briefkaesten_beispeil": [
+                ["[123],[456],[789],[101]", "Max", "0.98", "Briefkaesten_beispeil"]
+            ],
+            "Briefkaesten_beispeil_2": [
+                ["[123],[456],[789],[101]", "Mustermann", "0.87", "Briefkaesten_beispeil_2"]
+            ]
+        }
 
+        self.csv_model.clear()
+        self.csv_model.setHorizontalHeaderLabels(['bbox', 'Namen', 'Confidence Level', 'Bildname'])
+
+        for image_name, rows in example_dict.items():
+            for row in rows:
+                while len(row) < 4:
+                    row.append("")
+                items = [QStandardItem(str(col)) for col in row]
+                for item in items:
+                    item.setEditable(True)
+                self.csv_model.appendRow(items)
+
+    # old version of save_csv for single non mirrored tree
+    '''
     def save_csv_dialog(self):
         """
         Write the current data from the QTreeWidget back to self.current_csv_path.
@@ -1075,6 +1190,28 @@ class MainWindow(QMainWindow):
             writer.writerows(data_rows)
 
         # print(f"Saved changes back to: {self.current_csv_path}") # Debugging
+        '''
+
+    # new version of save_csv for mirrored tree csv
+    def save_csv_dialog(self):
+        if not self.current_csv_path:
+            print("No file path available to save.")
+            return
+
+        rows = []
+        header = ['bbox', 'Namen', 'Confidence Level', 'Bildname']
+        rows.append(header)
+
+        for row in range(self.csv_model.rowCount()):
+            row_data = []
+            for col in range(self.csv_model.columnCount()):
+                item = self.csv_model.item(row, col)
+                row_data.append(item.text() if item else "")
+            rows.append(row_data)
+
+        with open(self.current_csv_path, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerows(rows)
 
     def find_csv_file_of_image(self, image_path):
         file_path = image_path
