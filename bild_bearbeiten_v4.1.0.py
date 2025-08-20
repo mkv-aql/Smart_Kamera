@@ -4,13 +4,8 @@ __author__ = 'mkv-aql'
 import cv2, csv, ast, time, threading, os, sys, json
 import pandas as pd
 from pygments import highlight
-#comment
 
-## OLD DEAD MODULES
-# from Modules.class_clickable_image_V1 import ClickableImageLabel # For clickable image label
-# from Modules.class_highlight import RectangleSelector as rs #For highlighting module
-# from Modules.class_cutout import ImageCutoutSaver as ics #For cutout module
-# from Modules.class_entry_input_2 import CsvEditor as ei #For entry input module
+
 
 # from Modules.class_easyOCR_V1 import OCRProcessor # for ocr detection, Moved to run_detection() function for faster app
 from Modules.class_magnification_feature import ImageLabel #For magnification module
@@ -364,7 +359,8 @@ class MainWindow(QMainWindow):
         return cv_img_rgb_display, disp_width, disp_height
 
     def resize_window(self, loc_x=800, loc_y=100, disp_width=800, disp_height=800):
-        self.setGeometry(loc_x, loc_y, disp_width, disp_height)  # Set window location
+        # self.setGeometry(loc_x, loc_y, disp_width, disp_height)  # Set window location
+        self.resize(disp_width, disp_height)
 
     def fetch_top_level_tree_items(self, tree_widget):
         """
@@ -921,7 +917,7 @@ class MainWindow(QMainWindow):
             cv2.rectangle(self.cv_img_rgb_display,
                           (int((bbox[0][0])*scaled_ratio), int((bbox[0][1])*scaled_ratio)),
                           (int((bbox[2][0])*scaled_ratio), int((bbox[2][1])*scaled_ratio)),
-                          (0, 255, 0), 1)
+                          (255, 150, 0), 2)
 
         self.show_image_in_label(self.cv_img_rgb_display, self.label_edit_tab)
 
