@@ -1,5 +1,8 @@
 __author__ = 'mkv-aql'
-# v4.1.0: scanner deactivatable, mirrored csv editor in bild-bearbeiten tab
+# v4.1.0: scanner deactivatable, mirrored csv editor in bild-bearbeiten tab,
+# deletable csv data in tree, window stays in last position, color coded bbox confidence level,
+#
+
 # import nothing
 import cv2, csv, ast, time, threading, os, sys, json
 import pandas as pd
@@ -12,7 +15,7 @@ from Modules.class_magnification_feature import ImageLabel #For magnification mo
 
 from PyQt5 import QtGui
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QTextEdit,
+    QApplication, QMainWindow, QWidget, QTextEdit, QShortcut,
     QVBoxLayout, QHBoxLayout,  QFormLayout,
     QLabel, QLineEdit, QPushButton, QSpinBox, QTabWidget,
     QTreeWidget, QTreeWidgetItem, QMessageBox,QFileDialog, QAbstractItemView, QTreeView,
@@ -24,7 +27,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import (Qt, QPoint, QDir, QEvent,
                           QThread, QObject, pyqtSignal, QMutex, QTimer,
                           )
-from PyQt5.QtGui import QImage, QPixmap, QStandardItemModel, QStandardItem
+from PyQt5.QtGui import QImage, QPixmap, QStandardItemModel, QStandardItem, QKeySequence, QBrush
 
 
 class MainWindow(QMainWindow):
@@ -38,6 +41,7 @@ class MainWindow(QMainWindow):
         self.logo_path = self.resource_path("icon/DGN_Bildmarke_orange_rgb.png") # for pyinstaller to detect icon
         self.setWindowIcon(QtGui.QIcon(self.logo_path))
 
+        self.conf_threshold = 0.6  # threshold used to color bboxes (>= 0.6 = "good", < 0.6 = "low")
 
         # Create a central widget which will hold a QTabWidget with multiple tabs
         self.central_widget = QTabWidget()
@@ -66,6 +70,10 @@ class MainWindow(QMainWindow):
         # for mirror versions of csv editor for arbetisplatz and bild-bearbeiten tabs, must be called before init tabs
         self.csv_model = QStandardItemModel()
         self.csv_model.setHorizontalHeaderLabels(['bbox', 'Namen', 'Confidence Level', 'Bildname'])
+        self._suppress_model_changed = False  #  guard flag
+        self.csv_model.rowsRemoved.connect(self._on_model_changed)  # for delete row function
+        self.csv_model.rowsInserted.connect(self._on_model_changed)  # for delete row function
+        self.csv_model.dataChanged.connect(self._on_model_changed)  # for delete row function
 
         # Initialize and add tabs
         self.init_files_tab()
@@ -111,9 +119,11 @@ class MainWindow(QMainWindow):
         self.files_tab.setLayout(layout)
 
         # form-like layout
-        name_line_edit = QLineEdit()
+        self.name_line_edit = QLineEdit()
+        self.name_line_edit.setPlaceholderText("Namen eingeben und Enter drücken")  # NEW: UX hint
+        self.name_line_edit.returnPressed.connect(self.add_name_from_entry)  # NEW: pressing Enter adds the row
         form_layout = QFormLayout()
-        form_layout.addRow("Name:", name_line_edit)
+        form_layout.addRow("Name:", self.name_line_edit)
 
         layout.addLayout(form_layout)
 
@@ -134,6 +144,16 @@ class MainWindow(QMainWindow):
         self.csv_tree_view = QTreeView()  # Changed to QTreeView to have duplicate in the edit tab
         self.csv_tree_view.setModel(self.csv_model)  # for duplicate/mirror version
         self.csv_tree_view.setEditTriggers(QAbstractItemView.DoubleClicked)  # for duplicate/mirror version
+
+        self.csv_tree_view.setSelectionBehavior(QAbstractItemView.SelectRows)  # NEW
+        self.csv_tree_view.setSelectionMode(QAbstractItemView.ExtendedSelection)  # NEW
+
+        # Delete key to remove selected rows
+        self.del_shortcut_files = QShortcut(QKeySequence(Qt.Key_Delete), self.csv_tree_view)  # NEW
+        self.del_shortcut_files.activated.connect(self.delete_selected_rows)  # NEW
+
+        self.csv_tree_view.setSelectionBehavior(QAbstractItemView.SelectRows)  # For delete row function
+        # self.csv_tree_view.installEventFilter(self)  # for delete row function
         layout.addWidget(self.csv_tree_view) # for duplicate/mirror version
         # Populate from example_dict on startup
         self.populate_tree_from_dict()
@@ -221,6 +241,15 @@ class MainWindow(QMainWindow):
         self.csv_mirror_view.setEditTriggers(QAbstractItemView.DoubleClicked)
         self.csv_mirror_view.setMaximumHeight(150)
         self.csv_mirror_view.setAlternatingRowColors(True)
+
+        self.csv_mirror_view.setSelectionBehavior(QAbstractItemView.SelectRows)  # for delete row function
+        self.csv_mirror_view.setSelectionMode(QAbstractItemView.ExtendedSelection)  # for delete row function
+
+        self.del_shortcut_edit = QShortcut(QKeySequence(Qt.Key_Delete), self.csv_mirror_view)  # for delete row function
+        self.del_shortcut_edit.activated.connect(self.delete_selected_rows)  # for delete row function
+
+        self.csv_mirror_view.setSelectionBehavior(QAbstractItemView.SelectRows)  # for delete row function
+        # self.csv_mirror_view.installEventFilter(self)  # for delete row function
 
         # Hide all columns except 'Namen' (index 1)
         for i in range(self.csv_model.columnCount()):
@@ -496,6 +525,12 @@ class MainWindow(QMainWindow):
             # Mark event as handled
             return True
 
+        # delete selected rows on Delete key in either CSV view
+        # if source in (self.csv_tree_view, self.csv_mirror_view) and event.type() == QEvent.KeyPress:
+        #     if event.key() == Qt.Key_Delete:
+        #         self.delete_selected_rows()
+        #         return True
+
         # Otherwise, default handling
         return super().eventFilter(source, event)
 
@@ -617,7 +652,12 @@ class MainWindow(QMainWindow):
         filename = QDir.fromNativeSeparators(image_directory)  # convert back slash to forward slash in directory string
         filename = filename.split('/')[-1] # Get the filename from the full path
         # print(f'filename: {filename}') # Debugging
-        item = QTreeWidgetItem([filename])
+        # item = QTreeWidgetItem([filename])
+        item = QTreeWidgetItem([filename, ""])  # NEW: prepare 2nd column (“CSV-Datei”) so we can show status
+        item.setData(0, Qt.UserRole, image_directory)  # (existing)
+        self.image_tree_widget.addTopLevelItem(item)  # (existing)
+        self.flag_image_item(item)  # NEW: color + fill CSV column based on emptiness
+
         # Store full path so we can open the image later
         item.setData(0, Qt.UserRole, image_directory)
         self.image_tree_widget.addTopLevelItem(item)
@@ -675,6 +715,7 @@ class MainWindow(QMainWindow):
                 '''
         # temp = self.fetch_top_level_tree_items(self.image_tree_widget) # debug
         # print("fetch tree top level list: ", temp) # debug
+        self.refresh_image_list_flags()  # NEW: recompute flags for all rows after populating
 
     def image_tree_item_double_clicked(self, item, column):
         """
@@ -888,6 +929,9 @@ class MainWindow(QMainWindow):
         self.scan_thread.join()
         print('scan_thread finished')
 
+        if not batch_scanning:
+            self.show_scanned_names()
+
         # Enable button to stop scanning
         self.scan_button.setEnabled(True)
 
@@ -906,18 +950,42 @@ class MainWindow(QMainWindow):
         # clear the image display
         self.cv_img_rgb_display = self.cv_img_rgb_display_clean.copy()  # Replace with clean version
 
-        for bbox in df_ocr_results['bbox']:
-            # if bbox is a string then use ast.literal_eval to convert it to a list
-            if isinstance(bbox, str):
-                bbox = ast.literal_eval(bbox)
-            # bbox = ast.literal_eval(bbox) # Use if bbox is from csv file
-            print(f'bbox values: {bbox}')
-            scaled_ratio = self.cv_img_rgb_display.shape[0] / self.cv_img_rgb_original.shape[0] # match the ratio of the original image to the displayed image
+        # OLD single color bbox
+        # for bbox in df_ocr_results['bbox']:
+        #     # if bbox is a string then use ast.literal_eval to convert it to a list
+        #     if isinstance(bbox, str):
+        #         bbox = ast.literal_eval(bbox)
+        #     # bbox = ast.literal_eval(bbox) # Use if bbox is from csv file
+        #     print(f'bbox values: {bbox}')
+        #     scaled_ratio = self.cv_img_rgb_display.shape[0] / self.cv_img_rgb_original.shape[0] # match the ratio of the original image to the displayed image
+        #
+        #     cv2.rectangle(self.cv_img_rgb_display,
+        #                   (int((bbox[0][0])*scaled_ratio), int((bbox[0][1])*scaled_ratio)),
+        #                   (int((bbox[2][0])*scaled_ratio), int((bbox[2][1])*scaled_ratio)),
+        #                   (255, 150, 0), 1)
 
-            cv2.rectangle(self.cv_img_rgb_display,
-                          (int((bbox[0][0])*scaled_ratio), int((bbox[0][1])*scaled_ratio)),
-                          (int((bbox[2][0])*scaled_ratio), int((bbox[2][1])*scaled_ratio)),
-                          (255, 150, 0), 2)
+        # new color coded bbox
+        for _, row in df_ocr_results.iterrows():  # iterate rows so we can read bbox + confidence together
+            bbox = row['bbox']  # get bbox from the current row
+            if isinstance(bbox, str):
+                bbox = ast.literal_eval(bbox)  # if bbox stored as string, convert to list
+
+            conf = self._parse_confidence(
+                row.get('Confidence Level', ''))  # parse confidence to a float 0..1 (or None)
+            is_low = (conf is not None) and (conf < self.conf_threshold)  # decide if this bbox is below threshold
+
+            color = (0, 0, 255) if is_low else (
+            0, 255, 0)  # red for low-confidence, green otherwise (OpenCV uses BGR)
+
+            scaled_ratio = self.cv_img_rgb_display.shape[0] / self.cv_img_rgb_original.shape[
+                0]  # existing logic: scale Y→Y
+
+            cv2.rectangle(  # draw with the color chosen by confidence
+                self.cv_img_rgb_display,
+                (int((bbox[0][0]) * scaled_ratio), int((bbox[0][1]) * scaled_ratio)),
+                (int((bbox[2][0]) * scaled_ratio), int((bbox[2][1]) * scaled_ratio)),
+                color, 1
+            )
 
         self.show_image_in_label(self.cv_img_rgb_display, self.label_edit_tab)
 
@@ -954,8 +1022,8 @@ class MainWindow(QMainWindow):
         # Save the OCR results to a CSV file
         self.ocr_processor.save_to_csv(df_ocr_results, img_name_local, save_path)
 
-        if not batch_scanning:
-            self.show_scanned_names() # update image with scanned names
+        # if not batch_scanning:
+        #     self.show_scanned_names() # update image with scanned names
 
 
 
@@ -981,6 +1049,110 @@ class MainWindow(QMainWindow):
     # --------------------------------------------------------------------------
     # CSV Functions
     # --------------------------------------------------------------------------
+    def is_csv_empty(self, csv_path):  # NEW: returns True if CSV has no data rows (header-only or missing)
+        if not os.path.exists(csv_path):  # NEW: treat missing file as "empty"
+            return True
+        try:
+            with open(csv_path, newline='', encoding='utf-8') as f:  # NEW: open CSV
+                reader = csv.reader(f)
+                _ = next(reader, None)  # NEW: skip header row if present
+                for row in reader:  # NEW: look for any non-empty data row
+                    if any((cell or "").strip() for cell in row):  # NEW: consider a row “data” if any cell has text
+                        return False
+                return True  # NEW: no data rows found → empty
+        except Exception:
+            return True  # NEW: on read/parse error, fail safe to "empty"
+
+    def flag_image_item(self, item):  # NEW: colors the row + sets column text depending on CSV emptiness
+        img_path = QDir.fromNativeSeparators(item.data(0, Qt.UserRole))  # NEW: get full image path from item
+        base = os.path.splitext(os.path.basename(img_path))[0]  # NEW: image base name (without extension)
+        csv_path = os.path.join(self.csv_path, base + ".csv")  # NEW: where the CSV should be
+        empty = self.is_csv_empty(csv_path)  # NEW: check emptiness
+
+        # Set the 2nd column (“CSV-Datei”) text for clarity
+        item.setText(1, os.path.basename(csv_path) if os.path.exists(csv_path) else "(keine CSV)")  # NEW
+
+        if empty:
+            red = QBrush(Qt.red)  # NEW: create a red brush for foreground
+            item.setForeground(0, red)  # NEW: color Bildname red
+            item.setForeground(1, red)  # NEW: color CSV-Datei red
+            item.setToolTip(0, "CSV leer oder fehlt")  # NEW: tooltip for clarity
+            item.setToolTip(1, "CSV leer oder fehlt")  # NEW
+        else:
+            normal = QBrush()  # NEW: default brush clears custom coloring
+            item.setForeground(0, normal)  # NEW: reset color
+            item.setForeground(1, normal)  # NEW
+            item.setToolTip(0, "")  # NEW: clear tooltip
+            item.setToolTip(1, "")  # NEW
+
+    def refresh_image_list_flags(self):  # NEW: recompute flags for every row in the image list
+        for i in range(self.image_tree_widget.topLevelItemCount()):  # NEW: iterate all items
+            self.flag_image_item(self.image_tree_widget.topLevelItem(i))  # NEW: (re)apply flag per row
+
+    def add_name_from_entry(self):  # NEW: called when user presses Enter in the Name field
+
+        name = self.name_line_edit.text().strip()  # NEW: get typed name
+        if not name:  # NEW: ignore empty submissions
+            return
+
+        # Ensure we know where to save: if an image is selected but no CSV path set, derive it now
+        if not getattr(self, "current_csv_path", None) and getattr(self, "img_name", None):  # NEW
+            self.image_csv_finder()  # NEW: sets self.current_csv_path even if file doesn't exist yet
+
+        # Determine Bildname (use current image's base name if available; else empty)
+        bildname = ""  # NEW
+        if getattr(self, "img_name", None):  # NEW
+            bildname = os.path.splitext(os.path.basename(self.img_name))[0]  # NEW: e.g., "photo01"
+
+        # Build the new row: [bbox, Namen, Confidence Level, Bildname]
+        items = [
+            QStandardItem(""),  # NEW: bbox left empty
+            QStandardItem(name),  # NEW: Namen from the entry box
+            QStandardItem(""),  # NEW: Confidence Level left empty
+            QStandardItem(bildname),  # NEW: Bildname auto-filled
+        ]
+        for it in items:  # NEW: keep items editable like the rest
+            it.setEditable(True)
+
+        self.csv_model.appendRow(items)  # NEW: insert into the shared model (mirrors in both views)
+
+        self.name_line_edit.clear()  # NEW: reset the entry for the next name
+
+    def _parse_confidence(self, val):  # helper to normalize confidence values to a float 0..1
+        try:
+            s = str(val).strip()  # accept numbers or strings (e.g., "0.87", "87%", 87)
+            if s.endswith('%'):
+                return float(s[:-1]) / 100.0  # convert "87%" -> 0.87
+            f = float(s)
+            return f / 100.0 if f > 1.0 else f  # if value looks like 87, treat as 0.87; else use as-is
+        except Exception:
+            return None  # if parsing fails, return None so we can fall back gracefully
+
+    def delete_selected_rows(self):
+        # Decide which view is active
+        view = self.csv_tree_view if self.csv_tree_view.hasFocus() else (
+            self.csv_mirror_view if self.csv_mirror_view.hasFocus() else None
+        )
+        if view is None:
+            return
+
+        # Collect unique selected row indexes (can have multiple columns selected)
+        if view.selectionModel() is None:
+            return
+        selected_rows = {idx.row() for idx in view.selectionModel().selectedRows()}
+        if not selected_rows:
+            return
+
+        # Remove from bottom to top to keep indexes valid
+        for r in sorted(selected_rows, reverse=True):
+            self.csv_model.removeRow(r)
+
+        # Persist to CSV (if we have a path) and refresh rectangles
+        if getattr(self, "current_csv_path", None):
+            self.save_csv_dialog()  # writes the current model to self.current_csv_path
+            if self.image_csv_finder():  # re-point current_csv_path if needed
+                self.show_scanned_names()  # redraw using updated CSV
+
     def open_csv_dialog(self):
         """
         Open a file dialog to pick a CSV file, then populate the QTreeWidget
@@ -1051,31 +1223,48 @@ class MainWindow(QMainWindow):
     '''
     # new version of update tree for mirrored version of csv tree
     def update_tree(self, file_path):
-        if file_path == 'no_csv':
-            self.csv_model.removeRows(0, self.csv_model.rowCount())
+        self._suppress_model_changed = True  # for delete row function
+        try:
+            if file_path == 'no_csv':
+                self.csv_model.removeRows(0, self.csv_model.rowCount())
+                return
+
+            # Read the CSV
+            with open(file_path, newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+
+            if not rows:
+                return
+
+            self.csv_model.removeRows(0, self.csv_model.rowCount())  # Clear existing data
+
+            header = ['bbox', 'Namen', 'Confidence Level', 'Bildname']
+            self.csv_model.setHorizontalHeaderLabels(header)
+            rows = rows[1:]  # skip header row
+
+
+            for row_data in rows:
+                while len(row_data) < 4:
+                    row_data.append("")
+                items = [QStandardItem(col) for col in row_data[:4]]
+                for item in items:
+                    item.setEditable(True)
+                self.csv_model.appendRow(items)
+        finally:
+            self._suppress_model_changed = False  # for delete row function
+
+    def _on_model_changed(self, *args, **kwargs):  # for delete row function
+        # Skip reactions while we're programmatically rebuilding the model
+        if getattr(self, "_suppress_model_changed", False):
             return
 
-        # Read the CSV
-        with open(file_path, newline='', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            rows = list(reader)
-
-        if not rows:
-            return
-
-        self.csv_model.removeRows(0, self.csv_model.rowCount())  # Clear existing data
-
-        header = ['bbox', 'Namen', 'Confidence Level', 'Bildname']
-        self.csv_model.setHorizontalHeaderLabels(header)
-        rows = rows[1:]  # skip header row
-
-        for row_data in rows:
-            while len(row_data) < 4:
-                row_data.append("")
-            items = [QStandardItem(col) for col in row_data[:4]]
-            for item in items:
-                item.setEditable(True)
-            self.csv_model.appendRow(items)
+        if getattr(self, "current_csv_path", None):
+            self.save_csv_dialog()
+            if self.image_csv_finder():
+                # Only redraw if an image is actually loaded
+                if getattr(self, "cv_img_rgb_display_clean", None) is not None:
+                    self.show_scanned_names()
 
     # old non mirrored version
     '''
@@ -1208,6 +1397,8 @@ class MainWindow(QMainWindow):
         with open(self.current_csv_path, 'w', newline='', encoding='utf-8') as f:
             writer = csv.writer(f)
             writer.writerows(rows)
+
+        self.refresh_image_list_flags()  # NEW: update flags to reflect the new CSV contents
 
     def find_csv_file_of_image(self, image_path):
         file_path = image_path
