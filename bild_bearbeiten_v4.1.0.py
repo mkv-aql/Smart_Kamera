@@ -27,6 +27,11 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import (Qt, QPoint, QDir, QEvent,
                           QThread, QObject, pyqtSignal, QMutex, QTimer,
                           )
+
+# for pinstaller
+from PyQt5 import QtCore
+os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = QtCore.QLibraryInfo.location(QtCore.QLibraryInfo.PluginsPath)
+
 from PyQt5.QtGui import QImage, QPixmap, QStandardItemModel, QStandardItem, QKeySequence, QBrush
 
 
@@ -654,8 +659,7 @@ class MainWindow(QMainWindow):
         # print(f'filename: {filename}') # Debugging
         # item = QTreeWidgetItem([filename])
         item = QTreeWidgetItem([filename, ""])  # NEW: prepare 2nd column (“CSV-Datei”) so we can show status
-        item.setData(0, Qt.UserRole, image_directory)  # (existing)
-        self.image_tree_widget.addTopLevelItem(item)  # (existing)
+
         self.flag_image_item(item)  # NEW: color + fill CSV column based on emptiness
 
         # Store full path so we can open the image later
@@ -674,15 +678,23 @@ class MainWindow(QMainWindow):
         self.image_tree_widget.clear()
 
         # Loop through all items and add them to the tree widget
-        for image in folder_path_list:
-            #fetch the csv name of the image file
-            csv = self.find_csv_file_of_image(image)
+        # OLD
+        # for image in folder_path_list:
+        #     #fetch the csv name of the image file
+        #     csv = self.find_csv_file_of_image(image)
+        #
+        #     # print(f'item: {item}') # Debugging
+        #     item = QTreeWidgetItem([image, csv])
+        #     # Store full path so we can open the image later
+        #     item.setData(0, Qt.UserRole, item)
+        #     self.image_tree_widget.addTopLevelItem(item)
 
-            # print(f'item: {item}') # Debugging
-            item = QTreeWidgetItem([image, csv])
-            # Store full path so we can open the image later
-            item.setData(0, Qt.UserRole, item)
+        for img_path in folder_path_list:
+            filename = os.path.basename(QDir.fromNativeSeparators(img_path))  # visible text
+            item = QTreeWidgetItem([filename, ""])  # 2nd column for CSV status
+            item.setData(0, Qt.UserRole, img_path)  # keep the full path for double-click
             self.image_tree_widget.addTopLevelItem(item)
+            self.flag_image_item(item)  # apply (or re-apply) the red flag if CSV empty
 
 
     def open_image_folder(self):
